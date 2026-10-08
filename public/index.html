@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Joneli Industries Inc.</title>
+<meta name="description" content="Project engineering, distribution and procurement.">
+<meta property="og:title" content="Joneli Industries Inc."><meta property="og:type" content="website">
+<meta property="og:image" content="img/logo.jpg">
+<meta name="theme-color" content="#0b1220">
+<link rel="icon" href="img/logo.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap"><nav>
+<a class="logo" id="brand" href="#/"></a>
+<button id="mb" aria-label="Menu" aria-expanded="false" aria-controls="menu">☰</button>
+<ul id="menu"><li><a href="#/">Home</a></li><li><a href="#/about">About</a></li><li><a href="#/engineering">Project Engineering</a></li><li><a href="#/shop">Shop</a></li><li id="cartli" class="hid"><a href="#/cart">🛒 Cart (<span id="cc">0</span>)</a></li><li><a href="#/account" id="acct">Account</a></li><li><a class="cta" href="#/contact">Contact</a></li></ul>
+</nav></div></header>
+<main id="app"></main>
+<footer>
+  <div class="wrap fgrid">
+    <div class="fcol">
+      <a class="logo" id="fbrand" href="#/"></a>
+      <p id="fblurb"></p>
+    </div>
+    <div class="fcol">
+      <h4>Company</h4>
+      <a href="#/about">About us</a>
+      <a href="#/engineering">Project Engineering</a>
+      <a href="#/shop">Shop</a>
+      <a href="#/contact">Contact</a>
+    </div>
+    <div class="fcol">
+      <h4>Customers</h4>
+      <a href="#/cart">Cart</a>
+      <a href="#/account">Account</a>
+      <a href="#/engineering#quote">Request a quote</a>
+      <a href="#/admin">Admin login</a>
+    </div>
+    <div class="fcol">
+      <h4>Get in touch</h4>
+      <span id="fem"></span>
+      <span id="fph"></span>
+      <span id="faddr"></span>
+      <span id="fhrs"></span>
+    </div>
+  </div>
+  <div class="wrap fbot">
+    <div>© <span id="yr"></span> <span id="fn"></span></div>
+    <div><span id="ft"></span> · <a href="#/admin">Admin</a></div>
+  </div>
+</footer>
+<a id="wa" class="wa hid" target="_blank" rel="noopener" aria-label="WhatsApp">💬</a>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
