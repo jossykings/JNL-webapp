@@ -1105,6 +1105,142 @@ select {
   flex-wrap: wrap;
 }
 
+/* Sales dashboard: period filter bar */
+.fbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.chip {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 7px 16px;
+  cursor: pointer;
+  font: inherit;
+  font-size: .86rem;
+  white-space: nowrap;
+  transition: .22s;
+}
+
+.chip:hover { border-color: var(--acc); color: var(--acc); }
+
+.chip.on {
+  background: var(--grad);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 10px 22px -12px rgba(255, 122, 26, .95);
+}
+
+.chip.dl {
+  margin-left: auto;
+  background: rgba(255, 122, 26, .1);
+  border-color: rgba(255, 122, 26, .5);
+  color: var(--acc);
+  font-weight: 700;
+}
+
+.chip.dl:hover { background: var(--grad); border-color: transparent; color: #fff; }
+
+.fbar .sp { display: flex; gap: 6px; align-items: center; }
+.fbar .sp i { color: var(--mut); font-style: normal; }
+.fbar .sp input { width: auto; min-width: 132px; padding: 7px 10px; }
+
+.per { color: var(--mut); font-size: .85rem; margin: 0 0 18px; }
+.per b { color: var(--acc); }
+
+/* KPI tiles */
+.card.kpi h3 {
+  font-size: 1.5rem;
+  letter-spacing: -.03em;
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Revenue chart (pure CSS bars, tooltips via title) */
+.chart {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 190px;
+  border-bottom: 1px solid var(--line);
+  margin: 10px 0 34px;
+  padding-top: 8px;
+}
+
+.chart .bar {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.chart .bar i {
+  display: block;
+  width: 100%;
+  max-width: 46px;
+  background: var(--grad);
+  border-radius: 6px 6px 0 0;
+  min-height: 3px;
+  transition: filter .2s, transform .2s;
+  transform-origin: bottom;
+}
+
+.chart .bar:hover i { filter: brightness(1.18) saturate(1.25); transform: scaleX(1.08); }
+
+.chart .bar span {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: .58rem;
+  color: var(--mut);
+  white-space: nowrap;
+}
+
+/* Data table (products sold / stock) */
+.tbl {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow-x: auto;
+  margin-bottom: 26px;
+}
+
+.tr {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr .8fr 1.2fr 1fr 1.2fr;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: .88rem;
+  align-items: center;
+  min-width: 620px;
+}
+
+.tr:last-child { border-bottom: 0; }
+.tr span:not(:first-child) { text-align: right; }
+
+.th {
+  background: rgba(255, 122, 26, .07);
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--mut);
+}
+
 /* Floating edit bar */
 #bar {
   position: fixed;

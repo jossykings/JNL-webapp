@@ -32,8 +32,11 @@ let cat      = 'All';                                   // active shop category
 let q        = '';                                      // shop search query
 let pend     = null;                                    // pending image upload (admin)
 let AD       = null;                                    // admin dashboard data
-let tab      = 'products';                              // active admin tab
+let tab      = 'sales';                                 // active admin tab
 let authMode = 'login';                                 // 'login' | 'register'
+let SF       = { range: '7d', from: '', to: '' };       // sales report period filter
+let SALES    = null;                                    // loaded sales overview
+let salesKey = '';                                      // query SALES was loaded for
 
 let cart = JSON.parse(localStorage.getItem('cart') || '[]');
 let me   = JSON.parse(localStorage.getItem('me')   || 'null');
@@ -591,7 +594,31 @@ function account() {
 
 const ORDER_STATUSES = ['new', 'confirmed', 'paid', 'shipped', 'delivered', 'cancelled'];
 const QUOTE_STATUSES = ['new', 'contacted', 'won', 'closed'];
-const ADMIN_TABS     = ['products', 'orders', 'quotes', 'messages', 'projects', 'settings', 'stats'];
+const ADMIN_TABS     = ['sales', 'products', 'orders', 'quotes', 'messages', 'projects', 'staff', 'settings', 'stats'];
+const SALES_RANGES   = [['7d', 'Past 7 days'], ['30d', 'Past 30 days'], ['90d', 'Past 3 months'], ['180d', 'Past 6 months'], ['365d', 'Past 12 months'], ['all', 'All time']];
+
+// Query string for the currently selected sales period
+const sfQuery = () => SF.from || SF.to
+  ? 'from=' + encodeURIComponent(SF.from) + '&to=' + encodeURIComponent(SF.to)
+  : 'range=' + (SF.range || 'all');
+
+// Download a protected report as a file (CSV)
+async function dl(path) {
+  const r = await fetch('/api' + path, { headers: { Authorization: 'Bearer ' + atk() } });
+  if (!r.ok) {
+    if (r.status === 401) { sessionStorage.removeItem('atk'); throw new Error('Please sign in again'); }
+    throw new Error('Download failed');
+  }
+  const blob = await r.blob();
+  const m = /filename="?([^";]+)"?/.exec(r.headers.get('content-disposition') || '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = m ? m[1] : 'report.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
 
 const SETTINGS_INPUTS = [
   ['name',         'Company name'],
@@ -618,6 +645,73 @@ const option = (value, current) => `<option ${value === current ? 'selected' : '
 // Admin tab renderers (d = admin data)
 const adminTabs = d => ({
 
+  // Sales overview: period filters, KPIs, revenue chart, product breakdown, CSV
+  sales: () => {
+    const s = SALES;
+    if (!s) return '<p>Loading sales overview…</p>';
+    const k = s.kpis;
+    const stale = salesKey !== sfQuery();
+    const maxRev = Math.max(1, ...s.series.map(x => x.revenue));
+    const skip = Math.max(1, Math.ceil(s.series.length / 16));
+    return `
+    <div class="fbar">
+      ${SALES_RANGES.map(([v2, l]) => `<button class="chip ${!SF.from && !SF.to && SF.range === v2 ? 'on' : ''}" data-a="srange" data-v="${v2}">${l}</button>`).join('')}
+      <span class="sp"><input type="date" id="sfrom" value="${E(SF.from)}" aria-label="From date"><i>–</i><input type="date" id="sto" value="${E(SF.to)}" aria-label="To date"></span>
+      <button class="chip" data-a="scustom">Apply dates</button>
+      <button class="chip dl" data-a="scsv">⬇ Download CSV</button>
+    </div>
+    <p class="per">${E(s.label)}${stale ? ' · <b>updating…</b>' : ''} — ${k.orders} orders, ${k.units} units sold</p>
+
+    <div class="grid">
+      <div class="card kpi"><h3>${money(k.revenue)}</h3>Gross revenue</div>
+      <div class="card kpi"><h3>${money(k.paid)}</h3>Collected (paid)</div>
+      <div class="card kpi"><h3>${money(k.outstanding)}</h3>Amount left (unpaid)</div>
+      <div class="card kpi"><h3>${k.orders}</h3>Orders</div>
+      <div class="card kpi"><h3>${k.units}</h3>Units sold</div>
+      <div class="card kpi"><h3>${money(Math.round(k.avg))}</h3>Average order</div>
+      <div class="card kpi"><h3>${k.customers}</h3>Customers buying</div>
+      <div class="card kpi"><h3>${k.stockUnits}</h3>Units left in stock</div>
+      <div class="card kpi"><h3>${money(Math.round(k.stockValue))}</h3>Stock value left</div>
+    </div>
+
+    <h3>Revenue over time</h3>
+    ${s.series.length ? `<div class="chart">${s.series.map((x, i) => `
+      <div class="bar" title="${E(x.label)} — ${x.orders} orders · ${x.units} units · ${money(x.revenue)}">
+        <i style="height:${Math.max(2, Math.round(x.revenue / maxRev * 100))}%"></i>
+        <span>${i % skip === 0 ? E(x.label.slice(5)) : ''}</span>
+      </div>`).join('')}</div>` : '<p>No sales in this period.</p>'}
+
+    <h3>Products sold</h3>
+    <div class="tbl">
+      <div class="tr th"><span>Product</span><span>Price</span><span>Sold</span><span>Revenue</span><span>Left in stock</span><span>Stock value</span></div>
+      ${s.products.map(p => `<div class="tr">
+        <span>${E(p.ic || '📦')} ${E(p.name)}${p.cat ? ' · ' + E(p.cat) : ''}</span>
+        <span>${money(p.price)}</span>
+        <span>${p.qty}</span>
+        <span>${money(p.revenue)}</span>
+        <span>${p.stock}</span>
+        <span>${money(Math.round(p.stockValue))}</span>
+      </div>`).join('') || '<div class="tr"><span>No products yet.</span></div>'}
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Orders by status</h3>
+        ${Object.entries(s.byStatus).map(([st, n]) => `<div class="row"><span>${E(st)}</span><b>${n}</b></div>`).join('') || '<p>None.</p>'}
+      </div>
+      <div class="card">
+        <h3>Orders by payment method</h3>
+        ${Object.entries(s.byMethod).map(([m, n]) => `<div class="row"><span>${E(m)}</span><b>${n}</b></div>`).join('') || '<p>None.</p>'}
+      </div>
+    </div>
+
+    <h3>Latest orders in period</h3>
+    ${s.recent.map(o => `<div class="row">
+      <span>#${E(o.id)} · ${new Date(o.date).toLocaleDateString()} · ${E(o.name)} · ${o.items} item${o.items === 1 ? '' : 's'} · ${E(o.method)}</span>
+      <span><b>${money(o.total)}</b> ${o.paid ? '· ✅ paid' : '· ⏳ unpaid'} · ${E(o.status)}</span>
+    </div>`).join('') || '<p>No orders in this period.</p>'}`;
+  },
+
   products: () => `
     <div class="adm">
       <div class="f">
@@ -625,6 +719,7 @@ const adminTabs = d => ({
         <input id="ap2" type="number" step="any" placeholder="Price">
         <input id="ac"  placeholder="Category">
         <input id="ai"  placeholder="Emoji">
+        <input id="astk" type="number" min="0" placeholder="Units in stock">
       </div>
       <input id="ad" placeholder="Description">
       <input type="hidden" id="aid">
@@ -635,7 +730,7 @@ const adminTabs = d => ({
     </div>
     ${S.products.map(p => `
       <div class="row">
-        <span>${p.img ? '🖼️' : E(p.ic)} ${E(p.n)} · ${money(p.pr)} · ${E(p.cat)}</span>
+        <span>${p.img ? '🖼️' : E(p.ic)} ${E(p.n)} · ${money(p.pr)} · ${E(p.cat)} · ${Number.isFinite(p.stock) ? p.stock : 0} in stock</span>
         <span>
           <button class="btn s d" data-a="pedit" data-id="${p.id}">Edit</button>
           <button class="btn s d" data-a="pdel"  data-id="${p.id}">Delete</button>
@@ -683,6 +778,26 @@ const adminTabs = d => ({
         <button class="btn s d" data-a="jdel" data-id="${p.id}">Delete</button>
       </div>`).join('')}`,
 
+  // Staff accounts — visible to super admins only (filtered in adminView)
+  staff: () => `
+    <div class="adm">
+      <div class="f">
+        <input id="stn" placeholder="Full name">
+        <input id="ste" type="email" placeholder="Email">
+        <input id="stp" type="password" placeholder="Password (8+ characters)">
+        <select id="str" aria-label="Role"><option value="admin">Admin</option><option value="super">Super admin</option></select>
+      </div>
+      <button class="btn s" data-a="stsave">Create staff account</button>
+    </div>
+    <p class="per">Super admins see everything; admins manage products, orders, quotes and reports.</p>
+    ${(d.staff || []).map(s => `<div class="row">
+      <span>${s.role === 'super' ? '⭐' : '🛡️'} <b>${E(s.name)}</b> · ${E(s.email)} · ${E(s.role === 'super' ? 'Super admin' : 'Admin')}</span>
+      <span>
+        <button class="btn s d" data-a="strole" data-id="${s.id}" data-v="${s.role === 'super' ? 'admin' : 'super'}">${s.role === 'super' ? 'Demote to admin' : 'Promote to super'}</button>
+        <button class="btn s d" data-a="stdelete" data-id="${s.id}">Remove</button>
+      </span>
+    </div>`).join('') || '<p>No staff accounts yet — you are signed in with the master key.</p>'}`,
+
   settings: () => `
     <div class="card">
       <div class="f">
@@ -714,7 +829,12 @@ function adminView() {
   if (!atk()) {
     return hero('Admin <em>login</em>', '', 1, '') + `
       <section><div class="wrap"><div class="card" style="max-width:420px">
-        ${field('ap', 'Admin password', 'password')}
+        <h3>Sign in</h3>
+        <p>Staff accounts use their email + password. The master key needs no email.</p>
+        <label>Email
+          <input id="ae" type="email" placeholder="admin@company.com (blank = master key)">
+        </label>
+        ${field('ap', 'Password', 'password')}
         <p></p>
         <button class="btn" data-a="alogin">Sign in</button>
       </div></div></section>`;
@@ -723,15 +843,21 @@ function adminView() {
   // Data still loading
   if (!AD) return '<section><div class="wrap">Loading…</div></section>';
 
-  return hero('Admin <em>dashboard</em>', '', 1, '<button class="btn o" data-a="alogout">Sign out</button>') + `
+  // The staff tab is reserved for super admins
+  const tabs = ADMIN_TABS.filter(t => t !== 'staff' || AD.role === 'super');
+  if (!tabs.includes(tab)) tab = 'sales';
+  const roleLabel = AD.role === 'super' ? 'Super admin access' : 'Admin access';
+
+  return hero('Admin <em>dashboard</em>', roleLabel, 1, '<button class="btn o" data-a="alogout">Sign out</button>') + `
     <div class="subnav"><div class="wrap">
-      ${ADMIN_TABS.map(t => `<button class="${t === tab ? 'on' : ''}" data-a="tab" data-v="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}
+      ${tabs.map(t => `<button class="${t === tab ? 'on' : ''}" data-a="tab" data-v="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}
     </div></div>
     <section><div class="wrap">${adminTabs(AD)[tab]()}</div></section>`;
 }
 
 const refreshAdmin = async () => {
   AD = await api('/admin/data', {}, 1);
+  SALES = null; salesKey = '';                        // sales overview refetches on next view
   await load();
   render();
 };
@@ -818,13 +944,47 @@ const acts = {
 
   // ---- Admin auth / tabs ----
   alogin: async () => {
-    const r = await api('/admin/login', { method: 'POST', body: { password: v('ap') } });
+    const r = await api('/admin/login', { method: 'POST', body: { email: v('ae').trim(), password: v('ap') } });
     sessionStorage.setItem('atk', r.token);
-    AD = null;
+    AD = null; SALES = null; salesKey = '';
+    tab = 'sales';
     render();
   },
-  alogout: () => { sessionStorage.removeItem('atk'); AD = null; render(); },
+  alogout: () => { sessionStorage.removeItem('atk'); AD = null; SALES = null; salesKey = ''; render(); },
   tab:     d  => { tab = d.v; pend = null; render(); },
+
+  // ---- Admin: sales report filters & CSV download ----
+  srange:  d  => { SF = { range: d.v, from: '', to: '' }; render(); },
+  scustom: ()  => {
+    const f = v('sfrom'), t = v('sto');
+    if (!f && !t) { SF = { range: SF.range || '7d', from: '', to: '' }; toast('Showing ' + (SALES_RANGES.find(x => x[0] === SF.range) || ['', 'period'])[1].toLowerCase()); }
+    else SF = { range: '', from: f, to: t };
+    render();
+  },
+  scsv:    ()  => dl('/admin/sales.csv?' + sfQuery()).then(() => toast('Report downloaded')),
+
+  // ---- Admin: staff accounts (super admin) ----
+  stsave: async () => {
+    await api('/admin/staff', {
+      method: 'POST',
+      body: { name: v('stn'), email: v('ste'), password: v('stp'), role: v('str') }
+    }, 1);
+    toast('Staff account created');
+    clearFields(['stn', 'ste', 'stp']);
+    await refreshAdmin();
+  },
+  strole: async d => {
+    await api('/admin/staff/' + d.id, { method: 'PATCH', body: { role: d.v } }, 1);
+    toast('Role updated');
+    await refreshAdmin();
+  },
+  stdelete: async d => {
+    if (confirm('Remove this staff account?')) {
+      await api('/admin/staff/' + d.id, { method: 'DELETE' }, 1);
+      toast('Staff account removed');
+      await refreshAdmin();
+    }
+  },
 
   // ---- Admin: products ----
   psave: async () => {
@@ -838,6 +998,7 @@ const acts = {
         cat: v('ac'),
         ic:  v('ai'),
         d:   v('ad'),
+        stock: v('astk'),
         img: pend || old.img || ''
       }
     }, 1);
@@ -852,6 +1013,7 @@ const acts = {
     $('#ac').value  = p.cat;
     $('#ai').value  = p.ic;
     $('#ad').value  = p.d;
+    $('#astk').value = Number.isFinite(p.stock) ? p.stock : 0;
     $('#aid').value = p.id;
     scrollTo(0, 0);
   },
@@ -996,6 +1158,16 @@ async function render() {
     img('jim', 900,  d => { pend = d;                     $('#jst').textContent = 'Photo ready ✓'; });
     img('slg', 256,  d => { pend = { k: 'logo',    d };   toast('Logo ready: press Save'); });
     img('shi', 1600, d => { pend = { k: 'heroImg', d };   toast('Hero image ready: press Save'); });
+  }
+
+  // Admin: load the sales overview for the selected period (skips when fresh)
+  if (r === 'admin' && tab === 'sales' && AD && salesKey !== sfQuery()) {
+    const want = sfQuery();
+    api('/admin/sales?' + want, {}, 1).then(d => {
+      if (sfQuery() !== want) return;                // a newer filter superseded this one
+      SALES = d; salesKey = want;
+      if (location.hash === '#/admin' && tab === 'sales') render();
+    }).catch(err => toast(err.message));
   }
 
   // Account: load order history
