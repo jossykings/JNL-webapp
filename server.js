@@ -13,9 +13,9 @@ const seed = {
     about: "Write the company's story, mission and values here.", email: 'info@company.com', phone: '+000 000 000 0000',
     shopEmail: 'sales@company.com', shopPhone: '+000 000 000 0001', addr: 'Your business address', hours: 'Mon–Fri, 8am–5pm',
     cur: '$', currencyCode: 'usd', whatsapp: '', gaId: '', bank: 'Bank: Your Bank | Account name: Joneli Industries Inc. | Account no: 0000000000' },
-  products: [{ id: 'p1', n: 'Industrial Gate Valve 2"', cat: 'Valves', pr: 120, ic: '🔧', img: '', d: 'Cast steel, flanged.', stock: 120 },
-    { id: 'p2', n: 'Safety Helmet', cat: 'Safety', pr: 15, ic: '⛑️', img: '', d: 'Impact-rated, adjustable.', stock: 300 },
-    { id: 'p3', n: 'Power Cable 50m', cat: 'Electrical', pr: 85, ic: '🔌', img: '', d: 'Armoured copper cable.', stock: 80 }],
+  products: [{ id: 'p1', n: 'Industrial Gate Valve 2"', cat: 'Valves', pr: 120, ic: 'wrench', img: '', d: 'Cast steel, flanged.', stock: 120 },
+    { id: 'p2', n: 'Safety Helmet', cat: 'Safety', pr: 15, ic: 'hard-hat', img: '', d: 'Impact-rated, adjustable.', stock: 300 },
+    { id: 'p3', n: 'Power Cable 50m', cat: 'Electrical', pr: 85, ic: 'plug', img: '', d: 'Armoured copper cable.', stock: 80 }],
   projects: [], orders: [], quotes: [], messages: [], users: [], staff: [], views: {}
 };
 let db = fs.existsSync(FILE) ? { ...seed, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) } : seed;
@@ -82,7 +82,7 @@ const userTok = u => sign({ role: u.role || 'customer', id: u.id, exp: Date.now(
 app.post('/api/auth/register', (req, res) => { const { name, email, password } = req.body; const e = S(email, 150).toLowerCase();
   if (!name || !/^\S+@\S+\.\S+$/.test(e) || S(password).length < 8) return res.status(400).json({ error: 'Name, valid email and a password of 8+ characters are required' });
   if (db.users.find(u => u.email === e)) return res.status(400).json({ error: 'That email is already registered' });
-  const u = { id: uid(), name: S(name, 100), email: e, pw: hashPw(S(password, 200)), role: 'customer' }; db.users.push(u); save(); res.json({ token: userTok(u), user: userOut(u) }); });
+  const u = { id: uid(), name: S(name, 100), email: e, pw: hashPw(S(password, 200)), role: 'customer', date: new Date().toISOString() }; db.users.push(u); save(); res.json({ token: userTok(u), user: userOut(u) }); });
 app.post('/api/auth/login', (req, res) => { const u = db.users.find(x => x.email === S(req.body.email, 150).toLowerCase());
   if (!u || !checkPw(S(req.body.password, 200), u.pw)) return res.status(401).json({ error: 'Wrong email or password' }); res.json({ token: userTok(u), user: userOut(u) }); });
 app.get('/api/me/orders', auth('customer'), (req, res) => res.json(db.orders.filter(o => o.userId === req.u.id).reverse()));
@@ -132,7 +132,9 @@ app.post('/api/admin/login', (req, res) => { const t = tries[req.ip] = (tries[re
   res.json({ token: sign({ role: 'super', exp: Date.now() + 864e5 }), role: 'super', name: 'Super admin' }); });
 const A = auth('admin');
 const AS = auth('super');
-app.get('/api/admin/data', A, (req, res) => res.json({ role: req.u.role, orders: [...db.orders].reverse(), quotes: [...db.quotes].reverse(), messages: [...db.messages].reverse(), views: db.views, users: db.users.length, staff: db.staff.map(staffOut) }));
+app.get('/api/admin/data', A, (req, res) => res.json({ role: req.u.role, orders: [...db.orders].reverse(), quotes: [...db.quotes].reverse(), messages: [...db.messages].reverse(), views: db.views, users: db.users.length, staff: db.staff.map(staffOut),
+  // Full customer list is super-admin-only data; other roles never receive it
+  ...(req.u.role === 'super' ? { customers: db.users.map(customerOut) } : {}) }));
 
 // Staff accounts (super admin only)
 const superCount = () => db.staff.filter(x => x.role === 'super').length + (ADMIN_PASSWORD ? 1 : 0);
@@ -153,8 +155,16 @@ app.delete('/api/admin/staff/:id', AS, (req, res) => {
   const s = db.staff.find(x => x.id === req.params.id); if (!s) return res.sendStatus(404);
   if (s.role === 'super' && superCount() <= 1) return res.status(400).json({ error: 'At least one super admin must remain' });
   db.staff = db.staff.filter(x => x.id !== s.id); save(); res.json({ ok: 1 }); });
-app.put('/api/admin/settings', A, (req, res) => { for (const k of Object.keys(db.settings)) if (k in req.body) db.settings[k] = S(req.body[k], 2e6); save(); res.json({ ok: 1 }); });
-const pick = { products: o => ({ id: S(o.id, 20) || uid(), n: S(o.n, 150), cat: S(o.cat, 60) || 'General', pr: Number(o.pr), ic: S(o.ic, 8) || '📦', img: S(o.img, 2e6), d: S(o.d, 500), stock: Math.max(0, parseInt(o.stock, 10) || 0) }),
+// Registered customers — super admin only (frontend hides the tab, backend enforces)
+const customerOut = u => {
+  const os = db.orders.filter(o => o.userId === u.id || (u.email && o.email && String(o.email).toLowerCase() === u.email));
+  return { id: u.id, name: u.name, email: u.email, date: u.date || '', status: 'active',
+           orders: os.length, spent: Math.round(os.reduce((a, o) => a + (+o.total || 0), 0) * 100) / 100 };
+};
+app.get('/api/admin/customers', AS, (req, res) => res.json(db.users.map(customerOut)));
+// Site settings: super admin only
+app.put('/api/admin/settings', AS, (req, res) => { for (const k of Object.keys(db.settings)) if (k in req.body) db.settings[k] = S(req.body[k], 2e6); save(); res.json({ ok: 1 }); });
+const pick = { products: o => ({ id: S(o.id, 20) || uid(), n: S(o.n, 150), cat: S(o.cat, 60) || 'General', pr: Number(o.pr), ic: S(o.ic, 24) || 'package', img: S(o.img, 2e6), d: S(o.d, 500), stock: Math.max(0, parseInt(o.stock, 10) || 0) }),
   projects: o => ({ id: S(o.id, 20) || uid(), t: S(o.t, 150), d: S(o.d, 500), img: S(o.img, 2e6) }) };
 for (const k of Object.keys(pick)) {
   app.put('/api/admin/' + k, A, (req, res) => { const o = pick[k](req.body); if (!o.n && !o.t) return res.status(400).json({ error: 'Title is required' });

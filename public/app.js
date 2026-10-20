@@ -47,6 +47,12 @@ const money = n  => E(C().cur) + Number(n).toLocaleString();
 const v     = id => $('#' + id).value;
 const atk   = () => sessionStorage.getItem('atk');      // admin token
 
+// Icon system — Unicons, the open-source set by IconScout (self-hosted in public/vendor/unicons)
+const EMOJI_ICON = { '📦': 'package', '🔧': 'wrench', '⛑️': 'hard-hat', '🔌': 'plug',
+                     '📐': 'ruler', '⚙️': 'cog', '📋': 'clipboard-notes', '🛠️': 'wrench' };
+const icName = v => EMOJI_ICON[v] || (/^[a-z][a-z0-9-]{0,20}$/.test(String(v || '')) ? v : 'package');
+const ic = (v, cls) => `<i class="uil uil-${icName(v)}${cls ? ' ' + cls : ''}"></i>`;
+
 // API wrapper (pass admin=true to use the admin token)
 async function api(path, opts = {}, admin) {
   const token = admin ? atk() : localStorage.getItem('tk') || '';
@@ -108,12 +114,7 @@ const load = async () => { S = await api('/site'); };
 // 2. ARTWORK (SVG)
 // -----------------------------------------------------------------------------
 
-const grid =
-  '<defs><pattern id="g" width="40" height="40" patternUnits="userSpaceOnUse">' +
-  '<path d="M40 0H0V40" fill="none" stroke="#fff" stroke-opacity=".07"/></pattern></defs>' +
-  '<rect width="800" height="500" fill="url(#g)"/>';
-
-// Opening <svg> with gradient background + grid (caller closes the </svg>)
+// Opening <svg> with gradient background (caller closes the </svg>)
 const skyline = (id, endColor) => `
   <svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice">
     <defs>
@@ -122,7 +123,7 @@ const skyline = (id, endColor) => `
         <stop offset="1" stop-color="${endColor}"/>
       </linearGradient>
     </defs>
-    <rect width="800" height="500" fill="url(#${id})"/>${grid}`;
+    <rect width="800" height="500" fill="url(#${id})"/>`;
 
 // Photography shipped with the site (public/img/)
 const PIC = {
@@ -144,7 +145,7 @@ const ART = {
           <stop offset="1" stop-color="#1f3d8f"/>
         </linearGradient>
       </defs>
-      <rect width="800" height="500" fill="url(#h)"/>${grid}
+      <rect width="800" height="500" fill="url(#h)"/>
       <g fill="#fff" fill-opacity=".08">
         <rect x="470" y="260" width="60" height="240"/>
         <rect x="540" y="200" width="80" height="300"/>
@@ -219,12 +220,12 @@ function brand() {
   $('#ft').textContent = (c.email || '') + ' · ' + (c.phone || '');
 
   // Footer columns
-  const set = (id, txt) => { const el = $('#' + id); if (el) el.textContent = txt || ''; };
+  const fico = (id, icon, txt) => { const el = $('#' + id); if (el) el.innerHTML = txt ? ic(icon) + '<span>' + E(txt) + '</span>' : ''; };
   const fl = $('#fblurb'); if (fl) fl.textContent = c.tag || '';
-  set('fem',   c.email && '📧 ' + c.email);
-  set('fph',   c.phone && '📞 ' + c.phone);
-  set('faddr', c.addr  && '📍 ' + c.addr);
-  set('fhrs',  c.hours && '🕒 ' + c.hours);
+  fico('fem',   'envelope',       c.email);
+  fico('fph',   'phone',          c.phone);
+  fico('faddr', 'location-point', c.addr);
+  fico('fhrs',  'clock',          c.hours);
   $('#cc').textContent = cart.reduce((a, b) => a + b.qty, 0);
   document.title = c.name + ' | Engineering, Distribution & Procurement';
 
@@ -238,7 +239,10 @@ function brand() {
     w.classList.add('hid');
   }
 
-  $('#acct').textContent = me ? '👤 ' + me.name.split(' ')[0] : 'Account';
+  $('#acct').innerHTML = me ? ic('user-circle') + ' ' + E(me.name.split(' ')[0]) : 'Account';
+
+  // Navbar sign-out shows for every signed-in role (customer, admin, super admin)
+  $('#outli')?.classList.toggle('hid', !(me || atk()));
 
   // Google Analytics (loaded once)
   if (c.gaId && !window.gaOn && /^[\w-]+$/.test(c.gaId)) {
@@ -281,7 +285,12 @@ const contact = (title, email, phone) => `
       <div class="grid">
         <div class="card">
           <h3>Reach us</h3>
-          <p>📧 ${E(email)}<br>📞 ${E(phone)}<br>📍 ${E(C().addr)}<br>🕒 ${E(C().hours)}</p>
+          <p class="clist">
+            <span>${ic('envelope')}${E(email)}</span>
+            <span>${ic('phone')}${E(phone)}</span>
+            <span>${ic('location-point')}${E(C().addr)}</span>
+            <span>${ic('clock')}${E(C().hours)}</span>
+          </p>
         </div>
         <div class="card">
           <h3>Send a message</h3>
@@ -318,7 +327,7 @@ const aboutSec = () => `
 
 const pcard = p => `
   <div class="card">
-    <div class="pimg">${p.img ? `<img alt="${E(p.n)}" src="${E(p.img)}">` : E(p.ic || '📦')}</div>
+    <div class="pimg">${p.img ? `<img alt="${E(p.n)}" src="${E(p.img)}">` : ic(p.ic)}</div>
     <div class="tag">${E(p.cat)}</div>
     <h3>${E(p.n)}</h3>
     <p>${E(p.d)}</p>
@@ -364,8 +373,7 @@ const home = () =>
            <div class="t">
              <span class="dtag">01 — Engineering</span>
              <h3>Project Engineering</h3>
-             <p>Design, installation, commissioning and project management.</p>
-             <span class="btn s">Explore →</span>
+             <p>Design, installation, commissioning and project management.</p>              <span class="btn s">Explore <i class="uil uil-arrow-right"></i></span>
            </div>
          </a>
          <a class="div" href="#/shop">
@@ -373,22 +381,12 @@ const home = () =>
            <div class="t">
              <span class="dtag">02 — Supply</span>
              <h3>Distribution &amp; Procurement</h3>
-             <p>An online shop of quality products at clear prices.</p>
-             <span class="btn s">Shop now →</span>
+             <p>An online shop of quality products at clear prices.</p>              <span class="btn s">Shop now <i class="uil uil-arrow-right"></i></span>
            </div>
          </a>
        </div>
      </div>
    </section>` +
-
-  (S.products.length
-    ? `<section><div class="wrap rv">
-         <span class="eyebrow">Featured</span>
-         <h2>From the shop</h2>
-         <p class="sub"></p>
-         <div class="grid">${S.products.slice(0, 3).map(pcard).join('')}</div>
-       </div></section>`
-    : '') +
 
   `<section><div class="wrap">
      <div class="banner rv" style="background-image:url('${PIC.logistics}')">
@@ -403,10 +401,10 @@ const home = () =>
 
 // ---- Engineering ----
 const SERVICES = [
-  ['📐',  'Design & Consulting',          'Feasibility, detailed design and technical studies.'],
-  ['⚙️', 'Installation & Commissioning', 'Mechanical, electrical and process installation.'],
-  ['📋',  'Project Management',           'Planning, cost control and site supervision.'],
-  ['🛠️', 'Maintenance',                  'Scheduled and emergency maintenance support.']
+  ['ruler',           'Design & Consulting',          'Feasibility, detailed design and technical studies.'],
+  ['cog',             'Installation & Commissioning', 'Mechanical, electrical and process installation.'],
+  ['clipboard-notes', 'Project Management',           'Planning, cost control and site supervision.'],
+  ['wrench',          'Maintenance',                  'Scheduled and emergency maintenance support.']
 ];
 const QUOTE_SERVICES = [
   'Design & Consulting', 'Installation & Commissioning',
@@ -437,8 +435,7 @@ const eng = () =>
      <span class="eyebrow">Services</span>
      <h2>What we deliver</h2>
      <p class="sub">Edit these in app.js to match the company's offering.</p>
-     <div class="grid">
-       ${SERVICES.map(s => `<div class="card"><div class="ic">${s[0]}</div><h3>${s[1]}</h3><p>${s[2]}</p></div>`).join('')}
+     <div class="grid">        ${SERVICES.map(s => `<div class="card"><div class="ic">${ic(s[0])}</div><h3>${s[1]}</h3><p>${s[2]}</p></div>`).join('')}
      </div>
    </div></section>` +
 
@@ -500,7 +497,7 @@ function shop() {
        <input id="qs" placeholder="Search products…" value="${E(q)}">
      </div></div>
      <section><div class="wrap">
-       <div class="grid">${list.map(pcard).join('') || '<p class="empty">🔍<br>No products match your search.</p>'}</div>
+       <div class="grid">${list.map(pcard).join('') || `<p class="empty">${ic('search-alt')}<br>No products match your search.</p>`}</div>
      </div></section>` +
 
     contact('Shop contact', C().shopEmail, C().shopPhone);
@@ -518,12 +515,12 @@ function cartView() {
     ? `<div class="card">
          ${lines.map(l => `
            <div class="row">
-             <span>${E(l.p.ic)} ${E(l.p.n)} · ${money(l.p.pr)}</span>
+             <span>${ic(l.p.ic)} ${E(l.p.n)} · ${money(l.p.pr)}</span>
              <span>
-               <button class="btn s d" data-a="qty" data-id="${l.id}" data-d="-1">−</button>
+               <button class="btn s d" data-a="qty" data-id="${l.id}" data-d="-1"><i class="uil uil-minus"></i></button>
                ${l.qty}
-               <button class="btn s d" data-a="qty" data-id="${l.id}" data-d="1">+</button>
-               <button class="btn s d" data-a="rm"  data-id="${l.id}">✕</button>
+               <button class="btn s d" data-a="qty" data-id="${l.id}" data-d="1"><i class="uil uil-plus"></i></button>
+               <button class="btn s d" data-a="rm"  data-id="${l.id}"><i class="uil uil-times"></i></button>
              </span>
            </div>`).join('')}
          <h3 style="text-align:right">Total: ${money(total)}</h3>
@@ -545,8 +542,7 @@ function cartView() {
          </select>
          <p></p>
          <button class="btn" data-a="order">Place order</button>
-       </div>`
-    : '<p>Your cart is empty. <a href="#/shop"><b>Browse the shop →</b></a></p>';
+       </div>`     : '<p>Your cart is empty. <a href="#/shop"><b>Browse the shop <i class="uil uil-arrow-right"></i></b></a></p>';
 
   return hero('Your <em>Cart</em>', 'Review your items and check out.', 1, '') +
          `<section><div class="wrap">${body}</div></section>`;
@@ -594,7 +590,8 @@ function account() {
 
 const ORDER_STATUSES = ['new', 'confirmed', 'paid', 'shipped', 'delivered', 'cancelled'];
 const QUOTE_STATUSES = ['new', 'contacted', 'won', 'closed'];
-const ADMIN_TABS     = ['sales', 'products', 'orders', 'quotes', 'messages', 'projects', 'staff', 'settings', 'stats'];
+const ADMIN_TABS     = ['sales', 'products', 'orders', 'quotes', 'messages', 'projects', 'staff', 'customers', 'settings', 'stats'];
+const PRODUCT_ICONS  = ['package', 'wrench', 'hard-hat', 'plug', 'box', 'bolt', 'shield', 'cog', 'building', 'ruler', 'screw', 'processor'];
 const SALES_RANGES   = [['7d', 'Past 7 days'], ['30d', 'Past 30 days'], ['90d', 'Past 3 months'], ['180d', 'Past 6 months'], ['365d', 'Past 12 months'], ['all', 'All time']];
 
 // Query string for the currently selected sales period
@@ -658,7 +655,7 @@ const adminTabs = d => ({
       ${SALES_RANGES.map(([v2, l]) => `<button class="chip ${!SF.from && !SF.to && SF.range === v2 ? 'on' : ''}" data-a="srange" data-v="${v2}">${l}</button>`).join('')}
       <span class="sp"><input type="date" id="sfrom" value="${E(SF.from)}" aria-label="From date"><i>–</i><input type="date" id="sto" value="${E(SF.to)}" aria-label="To date"></span>
       <button class="chip" data-a="scustom">Apply dates</button>
-      <button class="chip dl" data-a="scsv">⬇ Download CSV</button>
+      <button class="chip dl" data-a="scsv"><i class="uil uil-download-alt"></i> Download CSV</button>
     </div>
     <p class="per">${E(s.label)}${stale ? ' · <b>updating…</b>' : ''} — ${k.orders} orders, ${k.units} units sold</p>
 
@@ -685,7 +682,7 @@ const adminTabs = d => ({
     <div class="tbl">
       <div class="tr th"><span>Product</span><span>Price</span><span>Sold</span><span>Revenue</span><span>Left in stock</span><span>Stock value</span></div>
       ${s.products.map(p => `<div class="tr">
-        <span>${E(p.ic || '📦')} ${E(p.name)}${p.cat ? ' · ' + E(p.cat) : ''}</span>
+        <span>${ic(p.ic)} ${E(p.name)}${p.cat ? ' · ' + E(p.cat) : ''}</span>
         <span>${money(p.price)}</span>
         <span>${p.qty}</span>
         <span>${money(p.revenue)}</span>
@@ -708,7 +705,7 @@ const adminTabs = d => ({
     <h3>Latest orders in period</h3>
     ${s.recent.map(o => `<div class="row">
       <span>#${E(o.id)} · ${new Date(o.date).toLocaleDateString()} · ${E(o.name)} · ${o.items} item${o.items === 1 ? '' : 's'} · ${E(o.method)}</span>
-      <span><b>${money(o.total)}</b> ${o.paid ? '· ✅ paid' : '· ⏳ unpaid'} · ${E(o.status)}</span>
+      <span><b>${money(o.total)}</b> ${o.paid ? `· ${ic('check-circle')} paid` : `· ${ic('clock')} unpaid`} · ${E(o.status)}</span>
     </div>`).join('') || '<p>No orders in this period.</p>'}`;
   },
 
@@ -718,19 +715,19 @@ const adminTabs = d => ({
         <input id="an"  placeholder="Product name">
         <input id="ap2" type="number" step="any" placeholder="Price">
         <input id="ac"  placeholder="Category">
-        <input id="ai"  placeholder="Emoji">
+        <select id="ai" aria-label="Icon">${PRODUCT_ICONS.map(n => `<option value="${n}">${n}</option>`).join('')}</select>
         <input id="astk" type="number" min="0" placeholder="Units in stock">
       </div>
       <input id="ad" placeholder="Description">
       <input type="hidden" id="aid">
       <p></p>
-      <label class="btn s d">📷 Photo<input id="aim" type="file" accept="image/*" hidden></label>
+      <label class="btn s d"><i class="uil uil-camera"></i> Photo<input id="aim" type="file" accept="image/*" hidden></label>
       <span id="ast"></span>
       <button class="btn s" data-a="psave">Save product</button>
     </div>
     ${S.products.map(p => `
       <div class="row">
-        <span>${p.img ? '🖼️' : E(p.ic)} ${E(p.n)} · ${money(p.pr)} · ${E(p.cat)} · ${Number.isFinite(p.stock) ? p.stock : 0} in stock</span>
+        <span>${p.img ? ic('image') : ic(p.ic)} ${E(p.n)} · ${money(p.pr)} · ${E(p.cat)} · ${Number.isFinite(p.stock) ? p.stock : 0} in stock</span>
         <span>
           <button class="btn s d" data-a="pedit" data-id="${p.id}">Edit</button>
           <button class="btn s d" data-a="pdel"  data-id="${p.id}">Delete</button>
@@ -739,7 +736,7 @@ const adminTabs = d => ({
 
   orders: () => d.orders.map(o => `
     <div class="card" style="margin-bottom:12px">
-      <b>#${o.id}</b> · ${new Date(o.date).toLocaleString()} · <b>${money(o.total)}</b> · ${o.method}${o.paid ? ' · ✅ paid' : ''}<br>
+      <b>#${o.id}</b> · ${new Date(o.date).toLocaleString()} · <b>${money(o.total)}</b> · ${o.method}${o.paid ? ` · ${ic('check-circle')} paid` : ''}<br>
       ${E(o.name)} · ${E(o.phone)} · ${E(o.email)}<br>
       ${E(o.address)}<br>
       <small>${o.lines.map(l => E(l.n) + ' ×' + l.qty).join(', ')}</small>
@@ -768,13 +765,13 @@ const adminTabs = d => ({
         <input id="jt" placeholder="Project title">
         <input id="jd" placeholder="Short description">
       </div>
-      <label class="btn s d">📷 Photo<input id="jim" type="file" accept="image/*" hidden></label>
+      <label class="btn s d"><i class="uil uil-camera"></i> Photo<input id="jim" type="file" accept="image/*" hidden></label>
       <span id="jst"></span>
       <button class="btn s" data-a="jsave">Add project</button>
     </div>
     ${S.projects.map(p => `
       <div class="row">
-        <span>${p.img ? '🖼️' : '🏗️'} ${E(p.t)}</span>
+        <span>${p.img ? ic('image') : ic('building')} ${E(p.t)}</span>
         <button class="btn s d" data-a="jdel" data-id="${p.id}">Delete</button>
       </div>`).join('')}`,
 
@@ -791,12 +788,27 @@ const adminTabs = d => ({
     </div>
     <p class="per">Super admins see everything; admins manage products, orders, quotes and reports.</p>
     ${(d.staff || []).map(s => `<div class="row">
-      <span>${s.role === 'super' ? '⭐' : '🛡️'} <b>${E(s.name)}</b> · ${E(s.email)} · ${E(s.role === 'super' ? 'Super admin' : 'Admin')}</span>
+      <span>${ic(s.role === 'super' ? 'star' : 'shield')} <b>${E(s.name)}</b> · ${E(s.email)} · ${E(s.role === 'super' ? 'Super admin' : 'Admin')}</span>
       <span>
         <button class="btn s d" data-a="strole" data-id="${s.id}" data-v="${s.role === 'super' ? 'admin' : 'super'}">${s.role === 'super' ? 'Demote to admin' : 'Promote to super'}</button>
         <button class="btn s d" data-a="stdelete" data-id="${s.id}">Remove</button>
       </span>
     </div>`).join('') || '<p>No staff accounts yet — you are signed in with the master key.</p>'}`,
+
+  // Registered customers — super admins only (data is only sent to them, filtered in adminView)
+  customers: () => `
+    <div class="tbl">
+      <div class="tr th"><span>Name</span><span>Email</span><span>Joined</span><span>Status</span><span>Orders</span><span>Spent</span></div>
+      ${(d.customers || []).map(c => `<div class="tr">
+        <span><b>${E(c.name)}</b></span>
+        <span>${E(c.email)}</span>
+        <span>${c.date ? new Date(c.date).toLocaleDateString() : '—'}</span>
+        <span>${ic('check-circle')} ${E(c.status)}</span>
+        <span>${c.orders}</span>
+        <span>${money(c.spent)}</span>
+      </div>`).join('') || '<div class="tr"><span>No customers yet — new registrations appear here instantly.</span></div>'}
+    </div>
+    <p class="per">Every account created on the public Account page appears here automatically.</p>`,
 
   settings: () => `
     <div class="card">
@@ -805,8 +817,8 @@ const adminTabs = d => ({
       </div>
       ${SETTINGS_TEXTAREAS.map(x => `<label>${x[1]}<textarea id="s_${x[0]}" rows="2">${E(C()[x[0]])}</textarea></label>`).join('')}
       <p></p>
-      <label class="btn s d">🏷️ Logo<input id="slg" type="file" accept="image/*" hidden></label>
-      <label class="btn s d">🖼️ Hero image<input id="shi" type="file" accept="image/*" hidden></label>
+      <label class="btn s d"><i class="uil uil-tag"></i> Logo<input id="slg" type="file" accept="image/*" hidden></label>
+      <label class="btn s d"><i class="uil uil-image"></i> Hero image<input id="shi" type="file" accept="image/*" hidden></label>
       <button class="btn s d" data-a="rmhero">Remove hero image</button>
       <button class="btn s" data-a="ssave">Save settings</button>
     </div>`,
@@ -843,8 +855,9 @@ function adminView() {
   // Data still loading
   if (!AD) return '<section><div class="wrap">Loading…</div></section>';
 
-  // The staff tab is reserved for super admins
-  const tabs = ADMIN_TABS.filter(t => t !== 'staff' || AD.role === 'super');
+  // Staff, customers and site settings are reserved for super admins
+  const SUPER_ONLY = ['staff', 'customers', 'settings'];
+  const tabs = ADMIN_TABS.filter(t => !SUPER_ONLY.includes(t) || AD.role === 'super');
   if (!tabs.includes(tab)) tab = 'sales';
   const roleLabel = AD.role === 'super' ? 'Super admin access' : 'Admin access';
 
@@ -941,6 +954,16 @@ const acts = {
     me = null;
     render();
   },
+  // Navbar sign out: clears the customer session AND the staff token in one go
+  signout: () => {
+    localStorage.removeItem('tk');
+    localStorage.removeItem('me');
+    sessionStorage.removeItem('atk');
+    me = null; AD = null; SALES = null; salesKey = ''; tab = 'sales'; authMode = 'login';
+    if (location.hash === '#/admin' || location.hash === '#/account') location.hash = '#/';
+    render();
+    toast('Signed out');
+  },
 
   // ---- Admin auth / tabs ----
   alogin: async () => {
@@ -1011,7 +1034,7 @@ const acts = {
     $('#an').value  = p.n;
     $('#ap2').value = p.pr;
     $('#ac').value  = p.cat;
-    $('#ai').value  = p.ic;
+    $('#ai').value  = icName(p.ic);
     $('#ad').value  = p.d;
     $('#astk').value = Number.isFinite(p.stock) ? p.stock : 0;
     $('#aid').value = p.id;
@@ -1092,11 +1115,12 @@ const setMenu = open => {
   $('#menu').classList.toggle('open', open);
   const mb = $('#mb');
   mb.classList.toggle('x', open);
-  mb.textContent = open ? '✕' : '☰';
+  mb.innerHTML = open ? '<i class="uil uil-times"></i>' : '<i class="uil uil-bars"></i>';
   mb.setAttribute('aria-expanded', String(open));
 };
 
 $('#mb').onclick = () => setMenu(!$('#menu').classList.contains('open'));
+$('#outa').onclick = e => { e.preventDefault(); setMenu(false); acts.signout(); };
 $('#menu').onclick = e => { if (e.target.closest('a')) setMenu(false); };
 addEventListener('hashchange', render);
 
@@ -1154,8 +1178,8 @@ async function render() {
 
   // Admin: image pickers
   if (r === 'admin') {
-    img('aim', 700,  d => { pend = d;                     $('#ast').textContent = 'Photo ready ✓'; });
-    img('jim', 900,  d => { pend = d;                     $('#jst').textContent = 'Photo ready ✓'; });
+    img('aim', 700,  d => { pend = d;                     $('#ast').innerHTML = 'Photo ready <i class="uil uil-check-circle"></i>'; });
+    img('jim', 900,  d => { pend = d;                     $('#jst').innerHTML = 'Photo ready <i class="uil uil-check-circle"></i>'; });
     img('slg', 256,  d => { pend = { k: 'logo',    d };   toast('Logo ready: press Save'); });
     img('shi', 1600, d => { pend = { k: 'heroImg', d };   toast('Hero image ready: press Save'); });
   }

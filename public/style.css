@@ -40,7 +40,6 @@
   --ring:  0 0 0 3px rgba(255, 122, 26, .18);
   --glow:  0 14px 34px -14px rgba(255, 122, 26, .75);
   --lift:  0 26px 50px -30px rgba(8, 16, 36, .55);
-  --grid-line: rgba(14, 26, 51, .06);
 
   box-sizing: border-box;
   padding-top:    env(safe-area-inset-top, 0px);
@@ -56,7 +55,6 @@
     --mut:  #9aa8c4;
     --navy: #060b15;
     --line: #24304d;
-    --grid-line: rgba(255, 255, 255, .05);
   }
 }
 
@@ -68,7 +66,6 @@
   --mut:  #9aa8c4;
   --navy: #060b15;
   --line: #24304d;
-  --grid-line: rgba(255, 255, 255, .05);
 }
 
 
@@ -170,14 +167,14 @@ nav {
   gap: 10px;
   font-weight: 800;
   text-decoration: none;
-  font-size: 1.05rem;
+  font-size: 1.13rem;
   letter-spacing: -.01em;
 }
 
 .lg {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 46px;
+  height: 46px;
   border-radius: 11px;
   background: var(--grad);
   display: grid;
@@ -372,21 +369,6 @@ nav ul a.cta:hover { filter: brightness(1.07); background: var(--grad); }
     linear-gradient(90deg, rgba(6, 10, 20, .94), rgba(6, 10, 20, .72) 45%, rgba(6, 10, 20, .38));
 }
 
-/* Fine blueprint grid, drawn above the overlay */
-.hero:before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, .055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, .055) 1px, transparent 1px);
-  background-size: 56px 56px;
-  -webkit-mask-image: radial-gradient(ellipse at 25% 55%, #000 10%, transparent 78%);
-          mask-image: radial-gradient(ellipse at 25% 55%, #000 10%, transparent 78%);
-}
-
 .hero .wrap {
   position: relative;
   z-index: 3;
@@ -561,18 +543,6 @@ nav ul a.cta:hover { filter: brightness(1.07); background: var(--grad); }
   background: linear-gradient(180deg, #0d1526, var(--navy));
   color: #fff;
   overflow: hidden;
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
-}
-
-.strip:before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, .04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, .04) 1px, transparent 1px);
-  background-size: 46px 46px;
-  pointer-events: none;
 }
 
 .strip .wrap {
@@ -585,16 +555,6 @@ nav ul a.cta:hover { filter: brightness(1.07); background: var(--grad); }
 }
 
 .strip .wrap > div { position: relative; padding: 6px 8px; }
-
-.strip .wrap > div + div:before {
-  content: "";
-  position: absolute;
-  left: -7px;
-  top: 20%;
-  height: 60%;
-  width: 1px;
-  background: linear-gradient(transparent, rgba(255, 255, 255, .28), transparent);
-}
 
 .strip b {
   display: block;
@@ -1082,6 +1042,23 @@ select {
   font-size: 1.02rem;
 }
 
+.empty .uil { font-size: 2rem; }
+
+/* Contact page detail list (icon + text rows) */
+.clist {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0 26px;
+}
+
+.clist span {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.clist .uil { color: var(--acc); font-size: 1.1rem; flex: none; }
+
 
 /* -----------------------------------------------------------------------------
    12. ADMIN
@@ -1100,8 +1077,7 @@ select {
   gap: 8px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
   flex-wrap: wrap;
 }
 
@@ -1210,9 +1186,8 @@ select {
   white-space: nowrap;
 }
 
-/* Data table (products sold / stock) */
+/* Data table (products sold / stock) — borderless, rows separated by spacing */
 .tbl {
-  border: 1px solid var(--line);
   border-radius: 14px;
   overflow-x: auto;
   margin-bottom: 26px;
@@ -1222,14 +1197,13 @@ select {
   display: grid;
   grid-template-columns: 2.2fr 1fr .8fr 1.2fr 1fr 1.2fr;
   gap: 8px;
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--line);
+  padding: 13px 14px;
   font-size: .88rem;
   align-items: center;
   min-width: 620px;
 }
 
-.tr:last-child { border-bottom: 0; }
+.tr + .tr { padding-top: 4px; }
 .tr span:not(:first-child) { text-align: right; }
 
 .th {
@@ -1282,38 +1256,17 @@ footer {
   overflow: hidden;
   background: linear-gradient(180deg, var(--navy), #070d1a);
   color: #93a2c0;
-  padding: 62px 0 0;
+  padding: 34px 0 0;
   font-size: .9rem;
-  border-top: 1px solid rgba(255, 255, 255, .06);
-}
-
-/* Accent hairline + faint blueprint grid */
-footer:before {
-  content: "";
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 122, 26, .7), transparent);
-}
-
-footer:after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, .03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, .03) 1px, transparent 1px);
-  background-size: 52px 52px;
 }
 
 footer .wrap { position: relative; z-index: 1; }
 
 .fgrid {
   display: grid;
-  gap: 34px;
+  gap: 26px;
   grid-template-columns: 1.7fr 1fr 1fr 1.3fr;
-  padding-bottom: 44px;
+  padding-bottom: 24px;
 }
 
 .fcol h4 {
@@ -1321,30 +1274,30 @@ footer .wrap { position: relative; z-index: 1; }
   font-size: .74rem;
   letter-spacing: .18em;
   text-transform: uppercase;
-  margin: 0 0 16px;
+  margin: 0 0 10px;
 }
 
-/* Brand block: the full logo lockup in a white tile + company name */
+/* Brand block: logo tile + company name side by side */
 .fcol .logo {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 14px;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
   color: #fff;
-  font-size: 1.12rem;
+  font-size: 1rem;
   font-weight: 800;
   letter-spacing: -.01em;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 
 .fcol .lg {
   display: grid;
-  width: 116px;
-  height: 116px;
-  padding: 8px;
+  width: 64px;
+  height: 64px;
+  padding: 6px;
   color: var(--navy);
   background: #fff;
-  border-radius: 20px;
-  box-shadow: 0 24px 46px -22px rgba(0, 0, 0, .95),
+  border-radius: 14px;
+  box-shadow: 0 16px 30px -16px rgba(0, 0, 0, .95),
               0 0 0 1px rgba(255, 255, 255, .28);
   transition: .3s cubic-bezier(.2, .7, .3, 1);
 }
@@ -1354,22 +1307,22 @@ footer .wrap { position: relative; z-index: 1; }
   height: 100%;
   object-fit: contain;
   background: #fff;
-  border-radius: 13px;
+  border-radius: 9px;
 }
 
 .fcol .logo:hover .lg {
-  transform: translateY(-4px) scale(1.02);
-  box-shadow: 0 32px 56px -24px rgba(0, 0, 0, 1),
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 22px 40px -18px rgba(0, 0, 0, 1),
               0 0 0 1px rgba(255, 255, 255, .4),
-              0 0 34px -14px rgba(255, 122, 26, .8);
+              0 0 30px -14px rgba(255, 122, 26, .8);
 }
 
-.fcol p { margin: 0; max-width: 300px; line-height: 1.75; font-size: .88rem; }
+.fcol p { margin: 0; max-width: 300px; line-height: 1.7; font-size: .88rem; }
 
 .fcol a:not(.logo) {
   display: block;
   text-decoration: none;
-  padding: 5px 0;
+  padding: 3px 0;
   font-size: .88rem;
   opacity: .8;
   transition: .2s;
@@ -1379,18 +1332,23 @@ footer .wrap { position: relative; z-index: 1; }
 
 .fcol span {
   display: block;
-  padding: 5px 0;
+  padding: 3px 0;
   font-size: .87rem;
 }
+
+/* Contact rows: icon + text, aligned on one line */
+#fem, #fph, #faddr, #fhrs { display: flex; gap: 9px; align-items: center; }
+#fem > span, #fph > span, #faddr > span, #fhrs > span { padding: 0; }
+#fem .uil, #fph .uil, #faddr .uil, #fhrs .uil { color: var(--acc); font-size: 1rem; flex: none; }
 
 .fbot {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
   justify-content: space-between;
-  border-top: 1px solid rgba(255, 255, 255, .08);
-  padding-top: 22px;
-  padding-bottom: 32px;
+  border-top: 1px solid rgba(255, 255, 255, .07);
+  padding-top: 14px;
+  padding-bottom: 18px;
   font-size: .8rem;
   opacity: .9;
 }
@@ -1523,7 +1481,6 @@ footer .wrap { position: relative; z-index: 1; }
   section { padding: 68px 0; }
 
   .strip .wrap { grid-template-columns: repeat(2, 1fr); gap: 22px; }
-  .strip .wrap > div:nth-child(3):before { display: none; }
   .strip b { font-size: 2rem; }
 
   .fgrid { grid-template-columns: 1fr 1fr; }
@@ -1536,7 +1493,7 @@ footer .wrap { position: relative; z-index: 1; }
   .gal.two .shot:last-child { margin-top: 0; }
   .gal.two .shot img { height: 240px; }
 
-  .fgrid { grid-template-columns: 1fr; gap: 28px; padding-bottom: 32px; }
+  .fgrid { grid-template-columns: 1fr; gap: 20px; padding-bottom: 20px; }
 
   .hbtns .btn { width: 100%; text-align: center; }
 

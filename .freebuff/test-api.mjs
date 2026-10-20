@@ -185,5 +185,42 @@ K('product PUT accepts stock', r.status === 200 && r.j.stock === 42, JSON.string
 r = await req('/api/admin/products', { method: 'PUT', token: ST, body: { id: 'p1', n: 'Industrial Gate Valve 2"', cat: 'Valves', pr: 120, stock: '-5' } });
 K('negative stock clamps to 0', r.status === 200 && r.j.stock === 0, String(r.j?.stock));
 
+// ---- 7. Customers & Settings — super admin only ----
+r = await req('/api/admin/customers', { token: ST });
+K('super lists customers 200', r.status === 200 && Array.isArray(r.j), String(r.status));
+const cu = r.j?.find(x => x.email === 'cust@test.dev');
+K('registered customer appears with name/date/status/orders/spent',
+  cu && cu.name === 'Cust Omer' && typeof cu.date === 'string' && cu.date.length > 10 &&
+  cu.status === 'active' && cu.orders === 0 && cu.spent === 0, JSON.stringify(cu));
+r = await req('/api/admin/data', { token: ST });
+K('super dashboard data includes customers array', Array.isArray(r.j?.customers) &&
+  r.j.customers.some(x => x.email === 'cust@test.dev'), String(r.j?.customers?.length));
+
+r = await req('/api/admin/staff', { method: 'POST', token: ST, body: { name: 'Admin Two', email: 'admin2@test.dev', password: 'password123', role: 'admin' } });
+K('super creates admin2 for permission checks', r.status === 200, String(r.status));
+const adm2 = await req('/api/admin/login', { method: 'POST', body: { email: 'admin2@test.dev', password: 'password123' } });
+const A2 = adm2.j?.token;
+r = await req('/api/admin/customers', { token: A2 });
+K('admin cannot list customers (super only)', r.status === 401, String(r.status));
+r = await req('/api/admin/data', { token: A2 });
+K('admin dashboard data omits customers field', r.status === 200 && !('customers' in r.j), JSON.stringify(Object.keys(r.j || {})));
+r = await req('/api/admin/customers', { token: CT });
+K('customer token: customers list 401', r.status === 401, String(r.status));
+r = await req('/api/admin/customers');
+K('no token: customers list 401', r.status === 401, String(r.status));
+
+// Settings: super can save; admin and customer are blocked (direct API calls too)
+r = await req('/api/admin/settings', { method: 'PUT', token: A2, body: { hours: 'hacked' } });
+K('admin cannot change settings (super only)', r.status === 401, String(r.status));
+r = await req('/api/admin/settings', { method: 'PUT', token: CT, body: { hours: 'hacked' } });
+K('customer token: settings 401', r.status === 401, String(r.status));
+const origHours = (await req('/api/site')).j.c.hours;
+r = await req('/api/admin/settings', { method: 'PUT', token: ST, body: { hours: 'Test hours' } });
+K('super can change settings', r.status === 200 && r.j.ok === 1, String(r.status));
+K('settings change persisted to /api/site', (await req('/api/site')).j.c.hours === 'Test hours',
+  String((await req('/api/site')).j.c.hours));
+await req('/api/admin/settings', { method: 'PUT', token: ST, body: { hours: origHours } });
+K('settings restored after test', (await req('/api/site')).j.c.hours === origHours, String(origHours));
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
