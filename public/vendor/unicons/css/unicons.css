@@ -1,4 +1,4 @@
-@font-face{font-family:Unicons;src:url(../unicons-line.woff2) format("woff2");font-weight:normal;font-style:normal;font-display:block}
+@font-face{font-family:"unicons-line";src:url(../unicons-line.woff2) format("woff2");font-weight:normal;font-style:normal;font-display:block}
 [class^="uil-"]:before,
 [class*=" uil-"]:before {
   font-family: "unicons-line";
