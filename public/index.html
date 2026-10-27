@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Joneli Industries Inc.</title>
-<meta name="description" content="Project engineering, distribution and procurement.">
+<meta name="description" content="Project engineering, distribution and procurement. Shop industrial supply online with tracked Canadian delivery.">
 <meta property="og:title" content="Joneli Industries Inc."><meta property="og:type" content="website">
 <meta property="og:image" content="img/logo.jpg">
 <meta name="theme-color" content="#0b1220">
@@ -12,18 +12,23 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="vendor/unicons/css/unicons.css?v=2">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="vendor/unicons/css/unicons.css">
+<link rel="stylesheet" href="style.css?v=5">
+<script src="theme-init.js?v=5"></script>
 </head>
 <body>
+<a class="skip" href="#app">Skip to content</a>
 <header><div class="wrap"><nav>
 <a class="logo" id="brand" href="#/"></a>
-<button id="mb" aria-label="Menu" aria-expanded="false" aria-controls="menu"><i class="uil uil-bars"></i></button>
-<ul id="menu"><li><a href="#/">Home</a></li><li><a href="#/about">About</a></li><li><a href="#/engineering">Project Engineering</a></li><li><a href="#/shop">Shop</a></li><li id="cartli" class="hid"><a href="#/cart"><i class="uil uil-shopping-cart"></i> Cart (<span id="cc">0</span>)</a></li>
+<div class="nright">
+  <button id="tt" class="tt" type="button" aria-label="Switch to dark mode" aria-pressed="false"><i class="uil uil-moon" aria-hidden="true"></i></button>
+  <button id="mb" aria-label="Menu" aria-expanded="false" aria-controls="menu"><i class="uil uil-bars" aria-hidden="true"></i></button>
+</div>
+<ul id="menu"><li><a href="#/">Home</a></li><li><a href="#/about">About</a></li><li><a href="#/engineering">Project Engineering</a></li><li><a href="#/shop">JNL Shop</a></li>
 <li><a href="#/account" id="acct">Account</a></li>
-<li id="outli" class="hid"><a href="#" id="outa" class="out"><i class="uil uil-signout"></i> Sign out</a></li><li><a class="cta" href="#/contact">Contact</a></li></ul>
+<li id="outli" class="hid"><a href="#" id="outa" class="out"><i class="uil uil-signout" aria-hidden="true"></i> Sign out</a></li><li><a class="cta" href="#/contact">Contact</a></li></ul>
 </nav></div></header>
-<main id="app"></main>
+<main id="app" tabindex="-1"></main>
 <footer>
   <div class="wrap fgrid">
     <div class="fcol">
@@ -34,13 +39,13 @@
       <h4>Company</h4>
       <a href="#/about">About us</a>
       <a href="#/engineering">Project Engineering</a>
-      <a href="#/shop">Shop</a>
+      <a href="#/shop">JNL Shop</a>
       <a href="#/contact">Contact</a>
     </div>
     <div class="fcol">
       <h4>Customers</h4>
       <a href="#/cart">Cart</a>
-      <a href="#/account">Account</a>
+      <a href="#/account">Account &amp; orders</a>
       <a href="#/engineering#quote">Request a quote</a>
     </div>
     <div class="fcol">
@@ -56,8 +61,9 @@
     <div><span id="ft"></span></div>
   </div>
 </footer>
-<a id="wa" class="wa hid" target="_blank" rel="noopener" aria-label="WhatsApp"><i class="uil uil-comment-dots"></i></a>
-<div id="toast"></div>
-<script src="app.js"></script>
+<a id="wa" class="wa hid" target="_blank" rel="noopener" aria-label="WhatsApp"><i class="uil uil-comment-dots" aria-hidden="true"></i></a>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="https://js.stripe.com/v3/" async></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

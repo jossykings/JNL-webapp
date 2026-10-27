@@ -2,7 +2,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 
-const BASE = 'http://localhost:3000';
+const BASE = process.env.BASE || 'http://localhost:3000';
 const env = fs.readFileSync('.env', 'utf8');
 const ADMIN_PASSWORD = (env.match(/^ADMIN_PASSWORD=(.*)$/m) || [])[1]?.trim();
 const SECRET = (env.match(/^SECRET=(.*)$/m) || [])[1]?.trim();

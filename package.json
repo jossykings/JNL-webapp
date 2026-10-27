@@ -1,1 +1,1 @@
-{"name":"company-site","version":"1.0.0","private":true,"scripts":{"start":"node --env-file=.env server.js","dev":"node --watch --env-file=.env server.js"},"engines":{"node":">=20.6"},"dependencies":{"express":"^4.19.2"}}
+{"name":"company-site","version":"1.0.0","private":true,"scripts":{"start":"node --env-file=.env server.js","dev":"node --watch --env-file=.env server.js"},"engines":{"node":">=20.6"},"dependencies":{"express":"^4.19.2","pdfkit":"^0.15.2","stripe":"^16.12.0"}}

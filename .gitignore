@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+
+# Runtime data: the shop database, generated invoice PDFs and backups
+data/db.json.*.tmp
+data/db.json.corrupt-*
+data/db.json.pre-ecom
+data/invoices/
+screenshots/

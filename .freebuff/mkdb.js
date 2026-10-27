@@ -30,5 +30,6 @@ base.orders = [
   mk(400, [L('p3', 'Power Cable 50m', 85, 2)], true, 'delivered', 'cod', 'Frank Foster', 'frank@test.dev')
 ];
 
-fs.writeFileSync('data/db.json', JSON.stringify(base));
-console.log('TEST_DB_WRITTEN orders=' + base.orders.length);
+const target = process.env.DB_FILE || 'data/db.json';
+fs.writeFileSync(target, JSON.stringify(base));
+console.log('TEST_DB_WRITTEN ' + target + ' orders=' + base.orders.length);
