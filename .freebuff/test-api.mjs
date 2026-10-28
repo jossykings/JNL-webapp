@@ -113,14 +113,21 @@ K('customer token: staff 401', r.status === 401, String(r.status));
 r = await req('/api/me/orders');
 K('no token: own orders 401', r.status === 401, String(r.status));
 
-// legacy 'user' role token (pre-upgrade sessions) still works
-const legacy = (() => {
-  const b = Buffer.from(JSON.stringify({ role: 'user', id: 'legacy', exp: Date.now() + day })).toString('base64url');
+// legacy 'user' role tokens (pre-upgrade sessions) still resolve to the customer
+const legacy = id => {
+  const b = Buffer.from(JSON.stringify({ role: 'user', id, exp: Date.now() + day })).toString('base64url');
   const mac = crypto.createHmac('sha256', SECRET).update(b).digest('base64url');
   return b + '.' + mac;
-})();
-r = await req('/api/me/orders', { token: legacy });
-K('legacy role "user" token accepted as customer', r.status === 200, String(r.status));
+};
+r = await req('/api/me/orders', { token: legacy(reg.j.user.id) });
+K('legacy role "user" token (real account) accepted as customer', r.status === 200, String(r.status));
+
+// A validly signed token for an account that no longer exists must be rejected
+// outright, not answered with 200 and empty per-customer data.
+r = await req('/api/me/orders', { token: legacy('deleted-account') });
+K('token for a removed account rejected (401)', r.status === 401, String(r.status));
+r = await req('/api/cart', { token: legacy('deleted-account') });
+K('removed account cannot read a cart (401)', r.status === 401, String(r.status));
 
 // ---- 5. Staff accounts (super creates, admin cannot) ----
 r = await req('/api/admin/staff', { method: 'POST', token: ST, body: { name: 'Admin One', email: 'admin1@test.dev', password: 'password123', role: 'admin' } });

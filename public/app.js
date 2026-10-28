@@ -48,13 +48,22 @@ let CO = null;                                           // checkout form state
 let CAR = { i: 0, timer: null, paused: false };          // shop carousel
 let acctTab = 'orders';
 let ACCT = { orders: null, invoices: null, methods: null, notifications: null };
-let AO = null, AI = null, AP = null, AA = null, ADMIN_ORDER = null;
+let AO = null, AI = null, AP = null, AA = null, ADMIN_ORDER = null, INVCUSTS = null;
+let ADMIN_TIMER = null, ADMIN_PAID = null, ADMIN_NEW_PAID = 0;   // live payments while the dashboard is open
 let OF = { q: '', payment: '', fulfillment: '', refund: '', from: '', to: '' };
 let theme = 'light';
 
 // Shorthands
 const C     = () => S.c;
-const money = n  => E(C().cur) + Number(n).toLocaleString();
+// Whole amounts stay compact ($120); anything with cents keeps two decimals ($476.40)
+const money = n  => {
+  const v = Number(n) || 0;
+  return E(C().cur) + v.toLocaleString('en-CA', {
+    minimumFractionDigits: Number.isInteger(v) ? 0 : 2,
+    maximumFractionDigits: 2
+  });
+};
+const docType = t => t === 'credit_note' ? 'Credit note' : t === 'invoice' ? 'Invoice' : String(t || '').replace(/_/g, ' ');
 const moneyC = n => E(C().cur) + (Number(n || 0) / 100).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const v     = id => $('#' + id).value;
 const atk   = () => sessionStorage.getItem('atk');      // admin token
@@ -82,6 +91,20 @@ async function loadCart() {
   badge();
 }
 
+// Revalidate the cached session on boot. A token whose account was removed or
+// revoked must not leave a signed-in navbar firing 401s on every request, so it
+// is dropped and the visitor continues as a guest. Network errors keep it.
+async function hydrateSession() {
+  if (!localStorage.getItem('tk')) { me = null; localStorage.removeItem('me'); return; }
+  try {
+    const r = await api('/auth/me');
+    me = r.user;
+    localStorage.setItem('me', JSON.stringify(me));
+  } catch (e) {
+    if (e.status === 401) { localStorage.removeItem('tk'); localStorage.removeItem('me'); me = null; }
+  }
+}
+
 const saveCart = () => {
   if (me) api('/cart', { method: 'PUT', body: { items: cart } }).catch(() => { });
   else localStorage.setItem('cart', JSON.stringify(cart));
@@ -89,7 +112,7 @@ const saveCart = () => {
 };
 
 // Human labels for the two independent order lifecycles
-const PAY_LABEL = { requires_payment: 'Awaiting payment', processing: 'Payment processing', paid: 'Paid', failed: 'Payment failed', cancelled: 'Payment cancelled', refund_pending: 'Refund pending', partially_refunded: 'Partially refunded', refunded: 'Refunded' };
+const PAY_LABEL = { requires_payment: 'Awaiting payment', processing: 'Payment processing', paid: 'Paid', unpaid: 'Unpaid', failed: 'Payment failed', cancelled: 'Payment cancelled', refund_pending: 'Refund pending', partially_refunded: 'Partially refunded', refunded: 'Refunded' };
 const FUL_LABEL = { unfulfilled: 'Not fulfilled', processing: 'Preparing', shipped: 'Shipped', out_for_delivery: 'Out for delivery', delivered: 'Delivered', cancelled: 'Cancelled' };
 const payBadge = st => `<span class="badge p-${E(st)}">${E(PAY_LABEL[st] || st)}</span>`;
 const fulBadge = st => `<span class="badge f-${E(st)}">${E(FUL_LABEL[st] || st)}</span>`;
@@ -340,6 +363,16 @@ function brand() {
 
   $('#acct').innerHTML = me ? ic('user-circle') + ' ' + E(me.name.split(' ')[0]) : 'Account';
 
+  // Shop navbar: profile sits beside the theme toggle and only appears when
+  // somebody is signed in.
+  const sa = $('#shopacct');
+  if (sa) {
+    sa.classList.toggle('hid', !me);
+    sa.innerHTML = me ? ic('user-circle') + '<span>' + E(me.name.split(' ')[0]) + '</span>' : '';
+    if (me) sa.setAttribute('aria-label', 'Your profile, ' + me.name);
+  }
+  $('#shopsignout')?.classList.toggle('hid', !(me || atk()));
+
   // Navbar sign-out shows for every signed-in role (customer, admin, super admin)
   $('#outli')?.classList.toggle('hid', !(me || atk()));
 
@@ -497,8 +530,8 @@ const home = () =>
   `<section><div class="wrap">
      <div class="banner rv" style="background-image:url('${PIC.logistics}')">
        <h2>Ready to start your project?</h2>
-       <p style="opacity:.85;margin:0 0 22px">Request a free quote from our engineers.</p>
-       <a class="btn" href="#/engineering#quote">Request a quote</a>
+       <p style="opacity:.85;margin:0 0 22px">Send us your scope and we'll respond with a written quotation.</p>
+       <a class="btn" href="#/engineering#quote">Send a Quotation</a>
      </div>
    </div></section>` +
 
@@ -532,7 +565,7 @@ const eng = () =>
     'Project <em>Engineering</em>',
     'From concept to commissioning, delivered safely, on time and on budget.',
     1,
-    '<button class="btn" data-a="explore">Explore our services</button> <a class="btn o" href="#/engineering#quote">Request a quote</a>',
+    '<button class="btn" data-a="explore">Explore our services</button> <a class="btn o" href="#/engineering#quote">Send a Quotation</a>',
     PIC.engineers
   ) +
 
@@ -564,22 +597,33 @@ const eng = () =>
      </div>
    </div></section>` +
 
-  // Quote form
+  // Quotation request: structured so the written quotation can be produced
+  // without a follow-up email for the basics.
   `<section id="quote" style="background:var(--card)"><div class="wrap">
-     <span class="eyebrow">Free quote</span>
+     <span class="eyebrow">Request for quotation</span>
      <h2>Tell us about your project</h2>
-     <p class="sub">We'll review it and get back to you.</p>
-     <div class="card">
+     <p class="sub">Send us the scope. We'll reply with a written quotation covering scope, price and lead time.</p>
+     <div class="card quoteform">
+       <label>Name<input id="qn" autocomplete="name" placeholder="Full name"></label>
        <div class="f">
-         ${field('qn', 'Name')}
-         ${field('qe', 'Email', 'email')}
-         ${field('qp', 'Phone')}
-         <select id="qs">${QUOTE_SERVICES.map(x => `<option>${x}</option>`).join('')}</select>
+         <label>Email<input id="qe" type="email" autocomplete="email" placeholder="you@company.com"></label>
+         <label>Phone<input id="qp" type="tel" autocomplete="tel" placeholder="+1 416 555 0134"></label>
+         <label>Company<input id="qco" autocomplete="organization" placeholder="Company (optional)"></label>
        </div>
+       <div class="f">
+         <label>Service<select id="qs">${QUOTE_SERVICES.map(x => `<option>${x}</option>`).join('')}</select></label>
+         <label>Province / territory<select id="qprov">
+           <option value="">Select province</option>
+           ${(S.provinces || []).map(p => `<option value="${p[0]}">${p[1]}</option>`).join('')}
+         </select></label>
+         <label>Timeline<select id="qtl">
+           <option>As soon as possible</option><option>Within 1 month</option><option>1–3 months</option><option>3–6 months</option><option>Flexible</option>
+         </select></label>
+       </div>
+       <label>Project details<textarea id="qd" rows="5" placeholder="Scope, location, quantities or equipment, and any site constraints." required></textarea></label>
        <input id="mw" class="hp" tabindex="-1" autocomplete="off">
-       <textarea id="qd" rows="4" placeholder="Describe the project, location and timeline"></textarea>
-       <p></p>
-       <button class="btn" data-a="quote">Submit request</button>
+       <p class="per">${ic('lock')} Your details are used only to prepare and send this quotation.</p>
+       <button class="btn" data-a="quote">Send a Quotation</button>
      </div>
    </div></section>` +
 
@@ -605,7 +649,7 @@ function shopHero() {
           <h1>JNL <em>SHOP</em></h1>
           <p class="cslide-t">${E(s.title || '')}</p>
           <p class="cslide-s">${E(s.text || '')}</p>
-          <div class="hbtns"><a class="btn" href="#/shop" data-a="carshop">Browse products</a> <a class="btn o" href="#/engineering#quote">Request a quote</a></div>
+          <div class="hbtns"><a class="btn" href="#/shop" data-a="carshop">Browse products</a></div>
         </div>
       </div>`).join('')}
     </div>
@@ -752,7 +796,7 @@ function authWall(title, sub) {
 }
 
 // ---- Checkout ----
-const PAYCFG = { mode: 'sandbox', sandbox: true, enabled: true, publishableKey: '', savedCards: [] };
+const PAYCFG = { mode: 'sandbox', sandbox: true, testMode: true, cardOnly: true, enabled: true, publishableKey: '', savedCards: [] };
 let STRIPE = null, ELEMENTS = null, CARD = null;
 
 const brandLabel = b => ({ visa: 'Visa', mastercard: 'Mastercard', amex: 'American Express', discover: 'Discover', jcb: 'JCB', unionpay: 'UnionPay', test: 'Test card' }[String(b).toLowerCase()] || String(b || 'Card'));
@@ -761,7 +805,7 @@ function freshCO() {
   return {
     name: me ? me.name : '', email: me ? me.email : '', phone: '',
     street: '', city: '', province: '', postal: '',
-    method: 'standard', pay: 'card', savedCard: '', saveCard: false, discount: '',
+    method: 'standard', pay: 'card', savedCard: '', saveCard: false,
     busy: false, error: '', order: null, clientSecret: '', idem: ''
   };
 }
@@ -771,7 +815,7 @@ function collectCO() {
   if (!CO) return;
   CO.name = coVal('co-name'); CO.email = coVal('co-email'); CO.phone = coVal('co-phone');
   CO.street = coVal('co-street'); CO.city = coVal('co-city'); CO.province = coVal('co-prov');
-  CO.postal = coVal('co-postal'); CO.discount = coVal('co-disc');
+  CO.postal = coVal('co-postal');
   const save = $('#co-save'); if (save) CO.saveCard = save.checked;
 }
 
@@ -788,9 +832,9 @@ const methodRadios = () => {
 
 const sandboxPanel = () => `
   <div class="sandboxnote">
-    <b>${ic('flask')} Sandbox payments</b>
-    <p>Stripe test credentials are not configured, so this store runs the checkout in sandbox mode. No card is requested and no money moves.</p>
-    <label>Simulated outcome
+    <b>${ic('flask')} Test payment environment</b>
+    <p>This store is in test mode. No real card details are accepted and no money moves. Choose the result this test payment should produce.</p>
+    <label>Test result
       <select id="sbx-outcome">
         <option value="succeed">Successful payment</option>
         <option value="fail">Declined card</option>
@@ -799,27 +843,23 @@ const sandboxPanel = () => `
     </label>
   </div>`;
 
+// Card is the only accepted payment method. Saved cards show only the safe
+// metadata the provider returns (brand, last four, expiry).
 const payPanel = () => {
   const cards = PAYCFG.savedCards || [];
   return `
   <div class="payopts" role="radiogroup" aria-label="Payment method">
-    <label class="payopt"><input type="radio" name="pay" value="card" data-a="setpay" ${CO.pay === 'card' ? 'checked' : ''}>
-      <span><b>Credit or debit card</b><small>${PAYCFG.sandbox ? 'Sandbox — nothing is charged' : 'Secured by Stripe · 3-D Secure when required'}</small></span>${ic('credit-card')}</label>
-    <label class="payopt"><input type="radio" name="pay" value="cod" data-a="setpay" ${CO.pay === 'cod' ? 'checked' : ''}>
-      <span><b>Pay on delivery</b><small>Pay the driver when it arrives</small></span>${ic('truck')}</label>
-    <label class="payopt"><input type="radio" name="pay" value="bank" data-a="setpay" ${CO.pay === 'bank' ? 'checked' : ''}>
-      <span><b>Bank transfer</b><small>We ship once the transfer clears</small></span>${ic('university')}</label>
+    <label class="payopt"><input type="radio" name="pay" value="card" checked>
+      <span><b>Credit or debit card</b><small>${PAYCFG.testMode ? 'Test mode — no real card is charged' : 'Secured by Stripe · 3-D Secure when required'}</small></span>${ic('credit-card')}</label>
   </div>
-  ${CO.pay !== 'card' ? `<p class="per">${CO.pay === 'bank' ? E(C().bank) : 'Pay in full on delivery. Your order is confirmed now and marked paid when payment is received.'}</p>` : `
-    ${cards.length ? `<div class="savedpick" role="radiogroup" aria-label="Saved cards">
+  ${cards.length ? `<div class="savedpick" role="radiogroup" aria-label="Saved cards">
       ${cards.map(c => `<label class="cardopt"><input type="radio" name="saved" value="${E(c.id)}" data-a="setsaved" ${CO.savedCard === c.id ? 'checked' : ''}>
         <span>${E(brandLabel(c.brand))} ···· ${E(c.last4)}</span><small>${String(c.expMonth).padStart(2, '0')}/${c.expYear}</small>${c.isDefault ? '<em>default</em>' : ''}</label>`).join('')}
       <label class="cardopt"><input type="radio" name="saved" value="" data-a="setsaved" ${CO.savedCard ? '' : 'checked'}><span>Use a new card</span></label>
     </div>` : ''}
-    ${CO.savedCard ? `<p class="per">${ic('lock')} Your bank may ask you to authenticate this saved card.</p>`
-      : PAYCFG.sandbox ? sandboxPanel() : `<div id="card-el" class="stripe-el"><span class="per">Loading the secure card form…</span></div>`}
-    ${CO.pay === 'card' ? `<label class="consent"><input type="checkbox" id="co-save" ${CO.saveCard ? 'checked' : ''}> Save this card for faster checkout <span>(optional)</span></label>` : ''}
-  `}`;
+  ${CO.savedCard ? `<p class="per">${ic('lock')} Your bank may ask you to authenticate this saved card.</p>`
+    : PAYCFG.sandbox ? sandboxPanel() : `<div id="card-el" class="stripe-el"><span class="per">Loading the secure card form…</span></div>`}
+  <label class="consent"><input type="checkbox" id="co-save" ${CO.saveCard ? 'checked' : ''}> Save this card for faster checkout <span>(optional)</span></label>`;
 };
 
 function summaryHTML() {
@@ -834,7 +874,6 @@ function summaryHTML() {
     </div>
     <div class="sumtotals">
       <div class="srow"><span>Subtotal</span><b>${moneyC(subC)}</b></div>
-      ${q && q.discountCents ? `<div class="srow disc"><span>Discount ${E(q.discountCode || '')}</span><b>−${moneyC(q.discountCents)}</b></div>` : ''}
       <div class="srow"><span>Shipping${q && q.shippingLabel ? ' · ' + E(q.shippingLabel) : ''}</span><b>${q && q.addressReady ? (q.shippingCents === 0 ? 'Free' : moneyC(q.shippingCents)) : '—'}</b></div>
       <div class="srow"><span>${q && q.taxLabel ? E(q.taxLabel) + (q.taxRate ? ' (' + q.taxRate + '%)' : '') : 'GST/HST'}</span><b>${q && q.addressReady ? moneyC(q.taxCents) : '—'}</b></div>
       <div class="srow tot"><span>Total (CAD)</span><b>${moneyC(totalC)}</b></div>
@@ -845,8 +884,8 @@ function summaryHTML() {
       ? `<div class="sandboxnote"><b>${ic('credit-card')} Sandbox payment</b><p>Order ${E(CO.order.number)} is waiting for a simulated provider result.</p>
           <div class="f"><button class="btn s" data-a="sbx" data-v="succeed">Pay ${moneyC(CO.order.totalCents)}</button>
           <button class="btn s d" data-a="sbx" data-v="fail">Simulate decline</button></div></div>`
-      : `<button class="btn w" data-a="place" ${CO.busy || !lines.length ? 'disabled' : ''}>${CO.busy ? 'Please wait…' : (CO.pay === 'card' ? 'Pay ' + moneyC(totalC) : 'Place order')}</button>`}
-    <p class="secure">${ic(PAYCFG.sandbox ? 'flask' : 'lock')} ${PAYCFG.sandbox ? 'Sandbox mode — no real payment is taken.' : 'Card details are handled by Stripe and never touch our servers.'}</p>
+      : `<button class="btn w" data-a="place" ${CO.busy || !lines.length ? 'disabled' : ''}>${CO.busy ? 'Please wait…' : 'Pay ' + moneyC(totalC)}</button>`}
+    <p class="secure">${ic(PAYCFG.sandbox ? 'flask' : 'lock')} ${PAYCFG.testMode ? 'Test payment environment — no real payment is taken.' : 'Card details are handled by Stripe and never touch our servers.'}</p>
   </div>`;
 }
 
@@ -899,12 +938,7 @@ function checkout() {
         <div class="card">
           <h3><span class="step">3</span> Payment</h3>
           <div id="copay">${payPanel()}</div>
-          ${PAYCFG.sandbox ? `<p class="per">${ic('info-circle')} Sandbox mode: no real payment is taken until Stripe credentials are configured.</p>` : ''}
-        </div>
-
-        <div class="card">
-          <h3><span class="step">4</span> Discount code</h3>
-          <div class="f"><input id="co-disc" placeholder="Enter a code" value="${E(CO.discount)}"><button class="btn s d" data-a="applydisc">Apply</button></div>
+          <p class="per">${ic('info-circle')} Card is the only payment method. ${PAYCFG.testMode ? 'Test mode: no real card details are accepted and no money is taken.' : ''}</p>
         </div>
       </div>
       <aside class="cosum" id="cosum" aria-live="polite">${summaryHTML()}</aside>
@@ -989,15 +1023,15 @@ function acctPanel() {
   }
   if (acctTab === 'invoices') {
     const list = ACCT.invoices || [];
-    return list.length ? `<div class="tbl inv"><div class="tr th"><span>Invoice</span><span>Order</span><span>Date</span><span>Total</span><span></span></div>
-      ${list.map(i => `<div class="tr"><span>${E(i.number)}</span><span>${E(i.orderNumber)}</span><span>${dateStr(i.date)}</span><span>${moneyC(i.totalCents)}</span><span><button class="btn s d" data-a="invoice" data-id="${i.id}">PDF</button></span></div>`).join('')}</div>`
-      : `<div class="card center">${ic('file-alt')}<h3>No invoices yet</h3><p class="per">An invoice is issued automatically once a payment is confirmed.</p></div>`;
+    return list.length ? `<div class="tbl inv acctinv"><div class="tr th"><span>Invoice</span><span>Date</span><span>Total</span><span>Payment</span><span></span></div>
+      ${list.map(i => `<div class="tr"><span><b>${E(i.number)}</b>${i.orderNumber ? `<br><small>Order ${E(i.orderNumber)}</small>` : '<br><small>Issued by JNL</small>'}</span><span>${dateStr(i.date)}</span><span>${moneyC(i.totalCents)}</span><span>${payBadge(i.paymentStatus)}</span><span><button class="btn s d" data-a="invoice" data-id="${i.id}">PDF</button></span></div>`).join('')}</div>`
+      : `<div class="card center">${ic('file-alt')}<h3>No invoices yet</h3><p class="per">Invoices for your orders and any invoice JNL issues to your account appear here.</p></div>`;
   }
   if (acctTab === 'cards') {
     const list = ACCT.methods || [];
     return `<div class="card">
       <h3>Saved cards</h3>
-      ${PAYCFG.sandbox ? `<p class="per">${ic('flask')} Sandbox mode — saved cards are simulated test tokens.</p>` : `<p class="per">${ic('lock')} Cards are stored with Stripe. We only keep the brand, last 4 digits and expiry.</p>`}
+      ${PAYCFG.testMode ? `<p class="per">${ic('flask')} Test mode — saved cards are simulated test tokens.</p>` : `<p class="per">${ic('lock')} Cards are stored with Stripe. We only keep the brand, last 4 digits and expiry.</p>`}
       ${list.length ? list.map(c => `<div class="row pml"><span>${ic('credit-card')} <b>${E(brandLabel(c.brand))} ···· ${E(c.last4)}</b> <small>exp ${String(c.expMonth).padStart(2, '0')}/${c.expYear}</small>${c.isDefault ? '<em class="def">default</em>' : ''}</span>
         <span>${c.isDefault ? '' : `<button class="btn s d" data-a="pmdef" data-id="${E(c.id)}">Make default</button>`}
         <button class="btn s d" data-a="pmdel" data-id="${E(c.id)}">Remove</button></span></div>`).join('') : '<p class="per">No saved cards yet.</p>'}
@@ -1055,6 +1089,32 @@ const SALES_RANGES   = [['7d', 'Past 7 days'], ['30d', 'Past 30 days'], ['90d', 
 const sfQuery = () => SF.from || SF.to
   ? 'from=' + encodeURIComponent(SF.from) + '&to=' + encodeURIComponent(SF.to)
   : 'range=' + (SF.range || 'all');
+
+// ---- Admin invoice entry helpers ----
+const taxRateOf = code => Number((((C().tax || {}).rates || {})[code] || {}).rate || 0);
+let ivSeq = 0;
+const invRow = () => {
+  const id = 'ivr' + (++ivSeq);
+  return `<div class="ivrow" id="${id}">
+    <input class="iv-d" placeholder="Description" aria-label="Line description">
+    <input class="iv-q" type="number" min="1" step="1" value="1" aria-label="Quantity">
+    <input class="iv-u" type="number" min="0" step="0.01" value="0" aria-label="Unit price">
+    <button class="qb rm" data-a="ivrm" data-row="${id}" aria-label="Remove line">${ic('times')}</button>
+  </div>`;
+};
+function ivTotals() {
+  let sub = 0;
+  document.querySelectorAll('#iv-lines .ivrow').forEach(r => {
+    const q = Math.max(0, Math.floor(Number(r.querySelector('.iv-q').value) || 0));
+    const u = Math.round((Number(r.querySelector('.iv-u').value) || 0) * 100);
+    sub += q * u;
+  });
+  const ship = Math.round((Number(($('#iv-ship') || {}).value) || 0) * 100);
+  const rate = taxRateOf((($('#iv-tax') || {}).value) || '');
+  const tax = Math.round((sub + ship) * rate / 100);
+  return { sub, ship, tax, total: sub + ship + tax };
+}
+const updateIvTotal = () => { const el = $('#iv-total'); if (el) el.textContent = moneyC(ivTotals().total); };
 
 // Download a protected report as a file (CSV)
 async function dl(path) {
@@ -1285,7 +1345,7 @@ const adminTabs = d => ({
     ${AO === null ? '<p>Loading orders…</p>' : (AO.length ? `<div class="tbl ord">
       <div class="tr th"><span>Order</span><span>Customer</span><span>Payment</span><span>Fulfillment</span><span>Total</span><span></span></div>
       ${AO.map(o => `<div class="tr">
-        <span><b>${E(o.number)}</b><br><small>${dateStr(o.date)}</small></span>
+        <span><b>${E(o.number)}</b><br><small>${dateStr(o.date)}</small>${o.itemSummary ? `<br><small class="itemsum">${E(o.itemSummary)}</small>` : ''}</span>
         <span>${E(o.customer?.name || '')}<br><small>${E(o.customer?.email || '')}</small></span>
         <span>${payBadge(o.paymentStatus)}</span>
         <span>${fulBadge(o.fulfillmentStatus)}</span>
@@ -1296,31 +1356,65 @@ const adminTabs = d => ({
     <p class="per">Search, filter by date, customer, number, payment, fulfillment or refund state. Totals are the server-stored order snapshot.</p>`,
 
   invoices: () => `
-    <div class="fbar"><input id="if-q" placeholder="Search invoice or order number, customer" aria-label="Search invoices">
+    <details class="card invnew" ${(AI && AI.length) ? '' : 'open'}>
+      <summary><b>New invoice</b><span>Issue an invoice to a registered customer</span></summary>
+      <p class="per">The PDF carries the JNL logo and appears in that customer's dashboard immediately. Totals and tax are calculated on the server.</p>
+      <div class="f">
+        <label>Customer<select id="iv-user">
+          <option value="">Select a registered customer</option>
+          ${(INVCUSTS || []).map(u => `<option value="${E(u.id)}">${E(u.name)} — ${E(u.email)}</option>`).join('')}
+        </select></label>
+        <label>Invoice date<input id="iv-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></label>
+        <label>Due date<input id="iv-due" type="date"></label>
+        <label>Payment status<select id="iv-status">
+          <option value="unpaid">Unpaid</option>
+          <option value="paid">Paid (test payment)</option>
+        </select></label>
+      </div>
+      <div class="f">
+        <label>Tax<select id="iv-tax">
+          <option value="">No tax</option>
+          ${(S.provinces || []).map(p => `<option value="${p[0]}">${p[1]} — ${taxRateOf(p[0])}%</option>`).join('')}
+        </select></label>
+        <label>Delivery / shipping ($)<input id="iv-ship" type="number" min="0" step="0.01" value="0"></label>
+      </div>
+      <div class="ivlines">
+        <div class="ivrow ivhead"><span>Description</span><span>Qty</span><span>Unit price ($)</span><span></span></div>
+        <div id="iv-lines">${invRow()}${invRow()}</div>
+      </div>
+      <button class="chip" data-a="ivadd">+ Add line</button>
+      <label>Notes<textarea id="iv-notes" rows="2" placeholder="PO number, payment terms or a short message"></textarea></label>
+      <p class="ivtotal">Invoice total <b id="iv-total">$0.00</b></p>
+      <button class="btn" data-a="ivcreate">Create invoice</button>
+    </details>
+
+    <div class="fbar"><input id="if-q" placeholder="Search invoice number, customer or email" aria-label="Search invoices">
       <button class="chip" data-a="ifilter">Search</button></div>
     ${AI === null ? '<p>Loading invoices…</p>' : (AI.length ? `<div class="tbl inv">
-      <div class="tr th"><span>Invoice</span><span>Order</span><span>Customer</span><span>Date</span><span>Total</span><span></span></div>
+      <div class="tr th"><span>Invoice</span><span>Customer</span><span>Date</span><span>Total</span><span>Payment</span><span></span></div>
       ${AI.map(i => `<div class="tr">
-        <span><b>${E(i.number)}</b><br><small>${E(i.type)}</small></span>
-        <span>${E(i.orderNumber)}</span>
+        <span><b>${E(i.number)}</b><br><small>${E(docType(i.type))}${i.source === 'admin' ? ' · entered' : ''}</small></span>
         <span>${E(i.customer)}<br><small>${E(i.email)}</small></span>
         <span>${dateStr(i.date)}</span>
         <span>${moneyC(i.totalCents)}</span>
+        <span>${payBadge(i.paymentStatus)}</span>
         <span><button class="btn s d" data-a="ainvoice" data-id="${E(i.id)}">PDF</button></span>
       </div>`).join('')}
-    </div>` : '<p>No invoices yet. One is generated for every confirmed payment.</p>')}`,
+    </div>` : '<p>No invoices yet. Create one above, or wait for a confirmed payment.</p>')}`,
 
   payments: () => `
-    <p class="per">Provider: <b>${E((AD && AD.paymentMode) || PAYCFG.mode)}</b> · statuses mirror the provider records. Card data is never shown because it is never stored.</p>
+    <p class="per">Provider: <b>${E((AD && AD.paymentMode) || PAYCFG.mode)}</b> · card only · statuses mirror the provider records. Card data is never shown because it is never stored.</p>
     ${AP === null ? '<p>Loading payments…</p>' : (AP.length ? `<div class="tbl pay">
-      <div class="tr th"><span>Order</span><span>Customer</span><span>Status</span><span>Amount</span><span>Refunds</span><span>Intent</span></div>
+      <div class="tr th"><span>Order</span><span>Customer</span><span>Status</span><span>Amount</span><span>Refunds</span><span>Intent</span><span></span></div>
       ${AP.map(p => `<div class="tr">
         <span><b>${E(p.orderNumber)}</b><br><small>${dateStr(p.date)}</small></span>
-        <span>${E(p.customer)}</span>
+        <span>${E(p.customer)}${p.itemSummary ? `<br><small class="itemsum">${E(p.itemSummary)}</small>` : ''}</span>
         <span>${payBadge(p.paymentStatus)}${p.lastError ? `<br><small class="err">${E(p.lastError)}</small>` : ''}</span>
         <span>${moneyC(p.amountCents)}</span>
         <span>${p.refunds ? p.refunds + ' · ' + moneyC(p.refundedCents) : '—'}</span>
         <span class="mono"><small>${E(p.intentId || '—')}</small></span>
+        <span>${['paid', 'partially_refunded', 'refunded'].includes(p.paymentStatus)
+          ? `<button class="btn s d" data-a="receipt" data-id="${E(p.orderId)}">Receipt</button>` : ''}</span>
       </div>`).join('')}
     </div>` : '<p>No payments yet.</p>')}`,
 
@@ -1332,12 +1426,23 @@ const adminTabs = d => ({
     </div>` : '<p>Nothing recorded yet.</p>')}`,
 
   quotes: () => d.quotes.map(o => `
-    <div class="card" style="margin-bottom:12px">
-      <b>${E(o.name)}</b> · ${E(o.service)} · ${new Date(o.date).toLocaleDateString()}<br>
-      ${E(o.email)} ${E(o.phone)}
-      <p>${E(o.details)}</p>
-      <select data-a="qstat" data-id="${o.id}">${QUOTE_STATUSES.map(s => option(s, o.status)).join('')}</select>
-    </div>`).join('') || '<p>No quote requests yet.</p>',
+    <article class="quoteview card">
+      <header class="qhead">
+        <div>
+          <h3>${E(o.name)}${o.company ? ` <small>${E(o.company)}</small>` : ''}</h3>
+          <p class="per">${E(o.email || 'No email')}${o.phone ? ' · ' + E(o.phone) : ''}</p>
+        </div>
+        <span class="qdate">Received ${dateStr(o.date)}</span>
+      </header>
+      <dl class="qmeta">
+        <div><dt>Service</dt><dd>${E(o.service || 'Not specified')}</dd></div>
+        <div><dt>Province</dt><dd>${E(o.province || 'Not specified')}</dd></div>
+        <div><dt>Timeline</dt><dd>${E(o.timeline || 'Not specified')}</dd></div>
+        <div><dt>Status</dt><dd><select data-a="qstat" data-id="${o.id}" aria-label="Quotation status">${QUOTE_STATUSES.map(s => option(s, o.status)).join('')}</select></dd></div>
+      </dl>
+      <div class="qbubble"><b>Project details</b><p>${E(o.details)}</p></div>
+      ${o.email ? `<a class="btn s d" href="mailto:${E(o.email)}?subject=${encodeURIComponent('Your quotation request — JNL')}">Reply with a quotation</a>` : ''}
+    </article>`).join('') || '<p>No quotation requests yet.</p>',
 
   messages: () => d.messages.map(o => `
     <div class="card" style="margin-bottom:12px">
@@ -1429,7 +1534,7 @@ const adminTabs = d => ({
 
     <h3>Sales tax by destination</h3>
     <div class="card">
-      <p class="per">Combined rate applied to the discounted subtotal plus shipping. Set a rate to 0 to stop charging tax in a province.</p>
+      <p class="per">Combined rate applied to the subtotal plus shipping. Set a rate to 0 to stop charging tax in a province.</p>
       <div class="taxgrid">
         ${(S.provinces || []).map(p => `<label>${p[1]}<input id="st_${p[0]}" type="number" min="0" max="30" step="0.001" value="${Number(C().tax.rates[p[0]]?.rate || 0)}"></label>`).join('')}
       </div>
@@ -1450,7 +1555,7 @@ const adminTabs = d => ({
   stats: () => `
     <div class="grid">
       <div class="card"><h3>${d.orders.length}</h3>orders</div>
-      <div class="card"><h3>${d.quotes.length}</h3>quote requests</div>
+      <div class="card"><h3>${d.quotes.length}</h3>quotation requests</div>
       <div class="card"><h3>${d.users}</h3>customers</div>
       <div class="card"><h3>${money(d.orders.filter(o => o.paid).reduce((a, o) => a + o.total, 0))}</h3>paid revenue</div>
     </div>
@@ -1487,17 +1592,61 @@ function adminView() {
 
   return hero('Admin <em>dashboard</em>', roleLabel, 1, '<button class="btn o" data-a="alogout">Sign out</button>') + `
     <div class="subnav"><div class="wrap">
-      ${tabs.map(t => `<button class="${t === tab ? 'on' : ''}" data-a="tab" data-v="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}
+      ${tabs.map(t => `<button class="${t === tab ? 'on' : ''}" data-a="tab" data-v="${t}">${t[0].toUpperCase() + t.slice(1)}${t === 'orders' && ADMIN_NEW_PAID ? ` <span class="tabbadge">${ADMIN_NEW_PAID}</span>` : ''}</button>`).join('')}
     </div></div>
     <section><div class="wrap">${adminTabs(AD)[tab]()}</div></section>`;
 }
 
 const refreshAdmin = async () => {
   AD = await api('/admin/data', {}, 1);
+  ADMIN_PAID = paidOrderIds(AD);
   SALES = null; salesKey = '';                        // sales overview refetches on next view
   await load();
   render();
 };
+
+// ---------------------------------------------------------------------------
+// Live payments on the admin dashboard. While a signed-in admin has the
+// dashboard open, poll the same data endpoint and surface a new paid order the
+// moment the server records it (the sandbox/Stripe webhook path is authoritative).
+// ---------------------------------------------------------------------------
+const PAID_STATES = ['paid', 'partially_refunded', 'refunded'];
+const paidOrderIds = data => new Set((data.orders || []).filter(o => PAID_STATES.includes(o.paymentStatus)).map(o => o.id));
+
+async function pollAdmin() {
+  if (!atk() || !AD || document.hidden || !location.hash.startsWith('#/admin')) return;
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;  // never yank a form mid-edit
+  try {
+    const fresh = await api('/admin/data', {}, 1);
+    const before = ADMIN_PAID || paidOrderIds(AD);
+    const now = paidOrderIds(fresh);
+    const added = [...now].filter(id => !before.has(id));
+    const listChanged = (fresh.orders || []).length !== (AD.orders || []).length;
+    ADMIN_PAID = now;
+    if (!added.length && !listChanged) return;
+
+    AD = fresh;
+    AO = null; AP = null; AI = null; AA = null;
+    SALES = null; salesKey = '';                    // KPIs and product counts refetch
+
+    if (added.length) {
+      const o = fresh.orders.find(x => x.id === added[0]);
+      if (tab !== 'orders') ADMIN_NEW_PAID += added.length;
+      toast(`Payment received — ${o.number} · ${moneyC(o.totalCents)} from ${o.customer?.name || o.name || 'customer'}`);
+    }
+    render(true);                                    // true = keep the admin's scroll position
+  } catch { /* a failed poll must not break the dashboard */ }
+}
+
+function startAdminPoll() {
+  if (ADMIN_TIMER) return;
+  ADMIN_TIMER = setInterval(pollAdmin, 10000);
+}
+function stopAdminPoll() {
+  clearInterval(ADMIN_TIMER);
+  ADMIN_TIMER = null;
+}
 
 
 // -----------------------------------------------------------------------------
@@ -1523,7 +1672,10 @@ async function loadAdminTab() {
   if (!atk() || !AD) return;
   try {
     if (tab === 'orders' && !AO) AO = (await api('/admin/orders?' + orderQuery(), {}, 1)).orders;
-    else if (tab === 'invoices' && !AI) { const f = $('#if-q')?.value || ''; AI = await api('/admin/invoices' + (f ? '?q=' + encodeURIComponent(f) : ''), {}, 1); }
+    else if (tab === 'invoices') {
+      if (!INVCUSTS) INVCUSTS = await api('/admin/customers/options', {}, 1);
+      if (!AI) { const f = $('#if-q')?.value || ''; AI = await api('/admin/invoices' + (f ? '?q=' + encodeURIComponent(f) : ''), {}, 1); }
+    }
     else if (tab === 'payments' && !AP) AP = (await api('/admin/payments', {}, 1)).payments;
     else if (tab === 'audit' && !AA && AD.role === 'super') AA = await api('/admin/audit', {}, 1);
   } catch (e) { toast(e.message); return; }
@@ -1576,7 +1728,7 @@ async function mergeCartAfterAuth() {
 async function refreshQuote() {
   if (!CO) return;
   collectCO();
-  const body = { items: cart, postalCode: CO.postal, province: CO.province, shippingMethod: CO.method, discountCode: CO.discount };
+  const body = { items: cart, postalCode: CO.postal, province: CO.province, shippingMethod: CO.method };
   try { Q = await api('/checkout/quote', { method: 'POST', body }); }
   catch (e) { Q = { ok: false, error: e.message }; }
   const s = $('#cosum'); if (s) s.innerHTML = summaryHTML();
@@ -1591,10 +1743,12 @@ const queueQuote = () => { clearTimeout(quoteTimer); quoteTimer = setTimeout(ref
 const renderSummary = () => { const s = $('#cosum'); if (s) s.innerHTML = summaryHTML(); };
 
 function finishOrder(id) {
+  const number = CO && CO.order ? CO.order.number : '';
   cart = [];
   saveCart();
   CO = null; Q = null;
   ACCT.orders = null; ACCT.invoices = null;
+  toast(number ? `Payment received — ${number} is confirmed` : 'Payment received — your order is confirmed');
   location.hash = '#/order/' + id;
 }
 
@@ -1639,6 +1793,7 @@ async function doSignOut() {
   me = null; AD = null; SALES = null; salesKey = ''; tab = 'sales';
   ACCT = { orders: null, invoices: null, methods: null, notifications: null };
   ADMIN_ORDER = null; AO = null; AI = null; AP = null; AA = null;
+  ADMIN_PAID = null; ADMIN_NEW_PAID = 0; stopAdminPoll();
   CO = null; Q = null; pendingCheckout = false; authMode = 'login';
   await loadCart();
   if (location.hash.startsWith('#/admin') || location.hash.startsWith('#/account') || location.hash.startsWith('#/order') || location.hash.startsWith('#/checkout')) location.hash = '#/';
@@ -1711,15 +1866,6 @@ const acts = {
     if (el) CO.method = el.value;
     refreshQuote();
   },
-  setpay: () => {
-    collectCO();
-    const el = document.querySelector('input[name="pay"]:checked');
-    if (el) CO.pay = el.value;
-    const host = $('#copay');
-    if (host) host.innerHTML = payPanel();
-    if (CO.pay === 'card') mountCard();
-    renderSummary();
-  },
   setsaved: () => {
     collectCO();
     const el = document.querySelector('input[name="saved"]:checked');
@@ -1728,7 +1874,6 @@ const acts = {
     if (host) host.innerHTML = payPanel();
     if (!CO.savedCard) mountCard();
   },
-  applydisc: () => { collectCO(); refreshQuote(); },
   place: async () => {
     collectCO();
     if (!CO || CO.busy) return;
@@ -1742,12 +1887,11 @@ const acts = {
         body: {
           items: cart, name: CO.name, email: CO.email, phone: CO.phone,
           street: CO.street, city: CO.city, province: CO.province, postalCode: CO.postal,
-          shippingMethod: CO.method, paymentMethod: CO.pay, discountCode: CO.discount,
+          shippingMethod: CO.method, paymentMethod: 'card',
           saveCard: CO.saveCard, savedPaymentMethodId: CO.savedCard || ''
         }
       });
       CO.order = r.order; CO.clientSecret = r.clientSecret; CO.mode = r.mode;
-      if (CO.pay !== 'card') return finishOrder(r.order.id);
       if (!r.clientSecret && r.order.paymentStatus === 'paid') return finishOrder(r.order.id);
       if (r.mode !== 'stripe') { CO.busy = false; renderSummary(); return; }
       await payStripe();
@@ -1782,12 +1926,17 @@ const acts = {
     clearFields(['mn', 'me', 'mb']);
   },
   quote: async () => {
+    if (!v('qd')) return toast('Tell us about the project so we can quote it');
     await api('/quotes', {
       method: 'POST',
-      body: { name: v('qn'), email: v('qe'), phone: v('qp'), service: v('qs'), details: v('qd'), website: v('mw') }
+      body: {
+        name: v('qn'), email: v('qe'), phone: v('qp'), company: v('qco'),
+        service: v('qs'), province: v('qprov'), timeline: v('qtl'),
+        details: v('qd'), website: v('mw')
+      }
     });
-    toast('Quote request sent!');
-    clearFields(['qn', 'qe', 'qp', 'qd']);
+    toast('Quotation request sent');
+    clearFields(['qn', 'qe', 'qp', 'qco', 'qd']);
   },
   // ---- Customer auth ----
   swap: () => { authMode = authMode === 'login' ? 'register' : 'login'; render(); },
@@ -1819,6 +1968,33 @@ const acts = {
   ainvoice: async d => {
     try { await dlFile('/admin/invoices/' + d.id + '/pdf', 'invoice.pdf', true); }
     catch (e) { toast(e.message); }
+  },
+  receipt: async d => {
+    try { await dlFile('/admin/payments/' + d.id + '/receipt', 'receipt.pdf', true); }
+    catch (e) { toast(e.message); }
+  },
+  ivadd: () => { $('#iv-lines')?.insertAdjacentHTML('beforeend', invRow()); updateIvTotal(); },
+  ivrm: d => { document.getElementById(d.row)?.remove(); updateIvTotal(); },
+  ivcreate: async () => {
+    const userId = v('iv-user');
+    if (!userId) return toast('Select a registered customer');
+    const items = [...document.querySelectorAll('#iv-lines .ivrow')].map(r => ({
+      description: r.querySelector('.iv-d').value.trim(),
+      qty: Number(r.querySelector('.iv-q').value),
+      unitCents: Math.round((Number(r.querySelector('.iv-u').value) || 0) * 100)
+    })).filter(i => i.description);
+    if (!items.length) return toast('Add at least one line with a description');
+    const t = ivTotals();
+    const body = {
+      userId, items,
+      issueDate: v('iv-date'), dueDate: v('iv-due'),
+      taxProvince: v('iv-tax'), shippingCents: t.ship,
+      paymentStatus: v('iv-status'), notes: v('iv-notes')
+    };
+    const r = await api('/admin/invoices', { method: 'POST', body }, 1);
+    AI = null; INVCUSTS = null;
+    await loadAdminTab();
+    toast('Invoice ' + r.invoice.number + ' created');
   },
   pfsave: async () => {
     const r = await api('/me/profile', { method: 'PATCH', body: { name: v('pf-name'), phone: v('pf-phone') } });
@@ -1972,8 +2148,22 @@ const acts = {
     tab = 'sales';
     render();
   },
-  alogout: () => { sessionStorage.removeItem('atk'); AD = null; SALES = null; salesKey = ''; render(); },
-  tab:     d  => { tab = d.v; pend = null; render(); },
+  alogout: () => {
+    sessionStorage.removeItem('atk'); AD = null; SALES = null; salesKey = '';
+    ADMIN_PAID = null; ADMIN_NEW_PAID = 0; stopAdminPoll(); render();
+  },
+  tab:     d  => {
+    tab = d.v; pend = null;
+    // Quotation requests and messages arrive from the public site, so refetch
+    // the dashboard snapshot instead of showing the list cached at login.
+    if (tab === 'quotes' || tab === 'messages') AD = null;
+    // Always reload the active commerce table so a payment that landed since
+    // the last poll is reflected the moment the admin opens it.
+    if (tab === 'orders') { AO = null; ADMIN_NEW_PAID = 0; }
+    if (tab === 'payments') AP = null;
+    if (tab === 'invoices') AI = null;
+    render();
+  },
 
   // ---- Admin: sales report filters & CSV download ----
   srange:  d  => { SF = { range: d.v, from: '', to: '' }; render(); },
@@ -2143,6 +2333,7 @@ const setMenu = open => {
 
 $('#mb').onclick = () => setMenu(!$('#menu').classList.contains('open'));
 $('#outa').onclick = e => { e.preventDefault(); setMenu(false); acts.signout(); };
+$('#shopsignout').onclick = () => acts.signout();
 $('#menu').onclick = e => { if (e.target.closest('a')) setMenu(false); };
 addEventListener('hashchange', render);
 
@@ -2151,7 +2342,7 @@ addEventListener('hashchange', render);
 // 8. ROUTER / RENDER
 // -----------------------------------------------------------------------------
 
-async function render() {
+async function render(silent = false) {
   const raw = location.hash.replace(/^#\/?/, '');
   const [pathPart, sub] = raw.split('#');
   const seg = (pathPart || '').split('/');
@@ -2159,8 +2350,14 @@ async function render() {
   const param = seg[1] || '';
 
   setMenu(false);
+  // The shop has its own lean navbar (logo, JNL SHOP, theme, profile, sign out)
+  document.body.classList.toggle('shop-only', r === 'shop');
   brand();
   applyTheme();
+
+  // Keep the admin dashboard listening for payments only while it is open.
+  if (r === 'admin' && atk() && AD) startAdminPoll();
+  else stopAdminPoll();
 
   // Highlight the active nav link
   document.querySelectorAll('#menu a').forEach(a =>
@@ -2168,7 +2365,7 @@ async function render() {
 
   const name = C().name || 'JNL';
   document.title = r === '' ? name + ' | Engineering, Distribution & Procurement'
-    : r === 'shop' ? 'JNL Shop | ' + name
+    : r === 'shop' ? 'JNL SHOP | ' + name
     : r === 'admin' ? 'Admin dashboard | ' + name
     : r === 'account' ? 'Your account | ' + name
     : r === 'cart' ? 'Cart | ' + name
@@ -2214,8 +2411,6 @@ async function render() {
       const el = $('#' + id);
       if (el) el.addEventListener('change', () => { collectCO(); if (CO.postal.length >= 6) queueQuote(); });
     });
-    const d = $('#co-disc');
-    if (d) d.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); acts.applydisc(); } });
     if (!Q && CO.postal.length >= 6) refreshQuote();
   }
 
@@ -2227,8 +2422,11 @@ async function render() {
 
   // Admin: load data once signed in
   if (r === 'admin' && atk() && !AD) {
-    try { AD = await api('/admin/data', {}, 1); render(); }
-    catch (e) { render(); }
+    try {
+      AD = await api('/admin/data', {}, 1);
+      ADMIN_PAID = paidOrderIds(AD);
+      render();
+    } catch (e) { render(); }
     return;
   }
 
@@ -2238,6 +2436,14 @@ async function render() {
     img('jim', 900,  d => { pend = d;                     $('#jst').innerHTML = 'Photo ready <i class="uil uil-check-circle"></i>'; });
     img('slg', 256,  d => { pend = { k: 'logo',    d };   toast('Logo ready: press Save'); });
     img('shi', 1600, d => { pend = { k: 'heroImg', d };   toast('Hero image ready: press Save'); });
+  }
+
+  // Admin: invoice entry total preview
+  if (r === 'admin' && tab === 'invoices') {
+    $('#iv-lines')?.addEventListener('input', updateIvTotal);
+    $('#iv-ship')?.addEventListener('input', updateIvTotal);
+    $('#iv-tax')?.addEventListener('change', updateIvTotal);
+    updateIvTotal();
   }
 
   // Admin: sales overview for the selected period
@@ -2270,7 +2476,7 @@ async function render() {
   // Scroll position
   if (r === 'contact')                  setTimeout(() => $('#contact')?.scrollIntoView(), 0);
   else if (sub)                         setTimeout(() => $('#' + sub)?.scrollIntoView(), 0);
-  else if (!(r === 'shop' && q))        scrollTo(0, 0);
+  else if (!silent && !(r === 'shop' && q) && render.last !== location.hash) scrollTo(0, 0);
 
   // Page-view tracking (once per hash change)
   if (!render.last || render.last !== location.hash) {
@@ -2288,6 +2494,7 @@ async function render() {
   initTheme();
   $('#tt').onclick = () => acts.theme();
   await Promise.all([load(), loadConfig()]);
+  await hydrateSession();
   if (me) await loadCart();
   await render();
 })().catch(() => {

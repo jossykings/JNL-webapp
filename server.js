@@ -179,7 +179,7 @@ app.get('/api/site', (req, res) => json(res, {
   products: db.products.filter(p => p.active !== false),
   projects: db.projects,
   provinces: ship.PROVINCES,
-  payment: { mode: payments.MODE, sandbox: payments.sandboxMode, enabled: payments.enabled }
+  payment: { mode: payments.MODE, sandbox: payments.sandboxMode, testMode: payments.testMode, enabled: payments.enabled, cardOnly: true }
 }));
 
 app.post('/api/track', (req, res) => {
@@ -201,12 +201,18 @@ app.post('/api/messages', rlPublicForm, (req, res) => {
 });
 
 app.post('/api/quotes', rlPublicForm, (req, res) => {
-  const b = req.body;
+  const b = req.body || {};
   if (b.website) return json(res, { ok: 1 });
   if (!b.name || !(b.email || b.phone) || !b.details) return fail(res, 'Name, a contact and project details are required');
-  db.quotes.push({ id: crypto.randomBytes(6).toString('hex'), date: new Date().toISOString(),
-    name: sec.str(b.name, 100), email: sec.str(b.email, 150), phone: sec.str(b.phone, 40),
-    service: sec.str(b.service, 80), details: sec.str(b.details), status: 'new' });
+  const email = sec.str(b.email, 150).toLowerCase();
+  if (email && !sec.isEmail(email)) return fail(res, 'Enter a valid email address');
+  db.quotes.push({
+    id: crypto.randomBytes(6).toString('hex'), date: new Date().toISOString(),
+    name: sec.str(b.name, 100), email, phone: sec.str(b.phone, 40),
+    company: sec.str(b.company, 120),
+    service: sec.str(b.service, 80), province: sec.str(b.province, 2).toUpperCase(),
+    timeline: sec.str(b.timeline, 60), details: sec.str(b.details), status: 'new'
+  });
   save(); json(res, { ok: 1 });
 });
 
@@ -324,6 +330,8 @@ app.delete('/api/cart', auth('customer'), (req, res) => {
 const checkoutConfig = () => ({
   mode: payments.MODE,
   sandbox: payments.sandboxMode,
+  testMode: payments.testMode,
+  cardOnly: true,
   publishableKey: payments.MODE === 'stripe' ? payments.PUBLISHABLE_KEY : '',
   enabled: payments.enabled,
   currency: db.settings.currencyCode || 'cad',
@@ -350,7 +358,6 @@ function quoteBody(b) {
     postalCode: sec.str(b.postalCode, 10),
     province: sec.str(b.province, 2).toUpperCase(),
     method: sec.str(b.shippingMethod, 30) || 'standard',
-    discountCode: sec.str(b.discountCode, 40),
     contact: { name: sec.str(b.name, 100), email: sec.str(b.email, 150), phone: sec.str(b.phone, 40) }
   };
 }
@@ -396,7 +403,10 @@ app.post('/api/checkout', rlCheckout, auth('customer'), async (req, res) => {
   const b = req.body || {};
   const idem = sec.str(req.headers['idempotency-key'] || b.idempotencyKey, 100);
   if (!idem) return fail(res, 'Missing Idempotency-Key header', 400);
-  const method = sec.oneOf(b.paymentMethod, ['card', 'cod', 'bank'], 'card');
+  // Card is the only payment method this store accepts. Anything else is
+  // rejected outright rather than silently coerced into a card charge.
+  if (b.paymentMethod && b.paymentMethod !== 'card') return fail(res, 'Card payment is the only available payment method', 422);
+  const method = 'card';
   const u = db.users.find(x => x.id === req.u.id);
   if (!u) return fail(res, 'Please sign in', 401);
 
@@ -407,7 +417,7 @@ app.post('/api/checkout', rlCheckout, auth('customer'), async (req, res) => {
   const { address, contact, errors: addrErrors } = checkoutAddress(b);
   if (addrErrors.length) return fail(res, addrErrors[0], 422);
 
-  const q = orders.quote({ items: b.items, postalCode: address.postalCode, province: address.province, method: sec.str(b.shippingMethod, 30) || 'standard', discountCode: sec.str(b.discountCode, 40) });
+  const q = orders.quote({ items: b.items, postalCode: address.postalCode, province: address.province, method: sec.str(b.shippingMethod, 30) || 'standard' });
   if (q.issues.length) return json(res, { error: q.issues[0], issues: q.issues }, 422);
   if (!q.addressReady) return fail(res, q.error || 'Delivery address incomplete', 422);
   if (!q.serviceable) return fail(res, q.error || 'We do not deliver to that address', 422);
@@ -423,7 +433,6 @@ app.post('/api/checkout', rlCheckout, auth('customer'), async (req, res) => {
       order.savedCard = sec.bool(b.saveCard);
       order.providerCustomerId = u.stripeCustomerId || '';
       orders.reserveStock(q.lines);
-      if (q.discount) { const d = db.discounts.find(x => x.code === q.discountCode); if (d) d.used = (d.used || 0) + 1; }
       db.orders.push(order);
       const c = cartOf(u); if (c) { c.items = []; c.updated = new Date().toISOString(); }
       return { order, replayed: false };
@@ -471,9 +480,6 @@ app.post('/api/checkout', rlCheckout, auth('customer'), async (req, res) => {
         await tx(() => webhooks.processEvent({ id: 'evt_reconcile_' + pi.id + '_succeeded', type: 'payment_intent.succeeded',
           data: { object: { id: pi.id, status: 'succeeded', amount: order.totalCents, metadata: { orderId: order.id } } } }));
       }
-    } else {
-      // Pay on delivery / bank transfer: unpaid until an admin confirms settlement
-      await tx(() => orders.addEvent(order, { type: 'payment_deferred', label: method === 'bank' ? 'Bank transfer selected' : 'Pay on delivery selected' }));
     }
   } catch (e) {
     await tx(() => {
@@ -729,7 +735,9 @@ app.post('/api/orders', optAuth, rlQuote, async (req, res) => {
       user: req.u && req.u.role === 'customer' ? { id: req.u.id } : null,
       contact: { name: b.name, phone: b.phone, email: b.email },
       address: { street: b.address, city: '', province: '', postalCode: '' },
-      method: sec.oneOf(b.method, ['cod', 'bank', 'card'], 'cod'),
+      // Card is the only method this shop accepts; this legacy endpoint can
+      // only create an unpaid card order, never a COD/bank one.
+      method: 'card',
       channel: 'legacy'
     });
     orders.reserveStock(priced.lines);
@@ -823,6 +831,13 @@ app.delete('/api/admin/staff/:id', AS, (req, res) => {
 });
 app.get('/api/admin/customers', AS, (req, res) => json(res, db.users.map(customerOut)));
 
+// Lightweight picker for invoice creation. Any admin who can issue invoices
+// needs to choose a real registered account, but not every admin may read the
+// full customer report, so only identity fields are returned here.
+app.get('/api/admin/customers/options', A, (req, res) => json(res,
+  db.users.map(u => ({ id: u.id, name: u.name, email: u.email }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)))));
+
 // ---------------------------------------------------------------------------
 // Admin: orders / payments / refunds / invoices / audit
 // ---------------------------------------------------------------------------
@@ -830,11 +845,16 @@ const orderFilters = q => {
   let list = [...db.orders];
   const term = sec.str(q.q, 80).toLowerCase();
   if (term) list = list.filter(o => [o.number, o.id, o.customer?.name, o.customer?.email, o.email, o.phone].filter(Boolean).join(' ').toLowerCase().includes(term));
-  if (q.paymentStatus) list = list.filter(o => o.paymentStatus === q.paymentStatus);
-  if (q.fulfillmentStatus) list = list.filter(o => o.fulfillmentStatus === q.fulfillmentStatus);
-  if (q.refundStatus === 'any') list = list.filter(o => (o.refunds || []).length);
-  if (q.refundStatus === 'full') list = list.filter(o => o.paymentStatus === 'refunded');
-  if (q.refundStatus === 'partial') list = list.filter(o => o.paymentStatus === 'partially_refunded');
+  // The dashboard sends short names (payment/fulfillment/refund); older clients
+  // and the CSV export send the long ones. Accept either.
+  const pay = q.paymentStatus || q.payment;
+  const ful = q.fulfillmentStatus || q.fulfillment;
+  const ref = q.refundStatus || q.refund;
+  if (pay) list = list.filter(o => o.paymentStatus === pay);
+  if (ful) list = list.filter(o => o.fulfillmentStatus === ful);
+  if (ref === 'any') list = list.filter(o => (o.refunds || []).length);
+  if (ref === 'full') list = list.filter(o => o.paymentStatus === 'refunded');
+  if (ref === 'partial') list = list.filter(o => o.paymentStatus === 'partially_refunded');
   const from = q.from ? Date.parse(q.from.length === 10 ? q.from + 'T00:00:00' : q.from) : null;
   const to = q.to ? Date.parse(q.to.length === 10 ? q.to + 'T23:59:59' : q.to) : null;
   if (Number.isFinite(from)) list = list.filter(o => Date.parse(o.date) >= from);
@@ -851,6 +871,7 @@ const adminOrderRow = o => ({
   paymentStatus: o.paymentStatus, fulfillmentStatus: o.fulfillmentStatus,
   refundedCents: o.refundedCents || 0, invoiceId: o.invoiceId || '',
   method: o.method, items: (o.items || []).length,
+  itemSummary: (o.items || []).map(i => `${i.qty}× ${i.name}`).join(', ').slice(0, 180),
   shipment: o.shipment ? { carrier: o.shipment.carrier, trackingNumber: o.shipment.trackingNumber, trackingUrl: o.shipment.trackingUrl } : null,
   lastPaymentError: o.lastPaymentError || ''
 });
@@ -952,11 +973,30 @@ app.post('/api/admin/orders/:id/tracking', A, (req, res) => {
   json(res, { shipment: o.shipment });
 });
 
+// Downloadable receipt for a recorded payment (real order + provider reference)
+app.get('/api/admin/payments/:orderId/receipt', A, async (req, res) => {
+  const o = db.orders.find(x => x.id === req.params.orderId);
+  if (!o) return fail(res, 'Order not found', 404);
+  if (!['paid', 'partially_refunded', 'refunded'].includes(o.paymentStatus)) {
+    return fail(res, 'A receipt exists only after a payment has been received', 409);
+  }
+  const payment = (db.payments || []).find(p => p.orderId === o.id && p.intentId === o.paymentIntentId)
+    || (db.payments || []).find(p => p.orderId === o.id);
+  const pdf = await invoices.buildReceiptPdf(o, { payment, testMode: payments.testMode || payments.sandboxMode });
+  audit.log({ actor: req.u.name || 'admin', actorId: req.u.id, role: req.u.role, action: 'receipt.downloaded', target: 'order', targetId: o.id, ip: sec.ipOf(req) });
+  save();
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Disposition', `inline; filename="${invoices.receiptNumber(o)}.pdf"`);
+  res.end(pdf);
+});
+
 app.get('/api/admin/payments', A, (req, res) => {
   const rows = db.orders.filter(o => o.paymentIntentId || ['failed', 'requires_payment', 'processing'].includes(o.paymentStatus))
     .map(o => ({
       orderId: o.id, orderNumber: o.number, date: o.date, customer: o.customer?.name || o.name,
       amountCents: o.totalCents, currency: o.currency, paymentStatus: o.paymentStatus,
+      itemSummary: (o.items || []).map(i => `${i.qty}× ${i.name}`).join(', ').slice(0, 180),
       provider: payments.MODE, intentId: o.paymentIntentId || '', lastError: o.lastPaymentError || '',
       refundedCents: o.refundedCents || 0, refunds: (o.refunds || []).length,
       requiresAction: !!o.requiresAction
@@ -1022,10 +1062,61 @@ app.get('/api/admin/invoices', A, (req, res) => {
   if (term) list = list.filter(i => [i.number, i.orderNumber, i.snapshot?.customer?.name, i.snapshot?.customer?.email].filter(Boolean).join(' ').toLowerCase().includes(term));
   if (req.query.type) list = list.filter(i => i.type === req.query.type);
   json(res, list.sort((a, b) => Date.parse(b.date) - Date.parse(a.date)).map(i => ({
-    id: i.id, number: i.number, type: i.type, date: i.date, orderId: i.orderId, orderNumber: i.orderNumber,
-    customer: i.snapshot?.customer?.name || '', email: i.snapshot?.customer?.email || '',
+    id: i.id, number: i.number, type: i.type, source: i.source || 'order', date: i.date, dueDate: i.dueDate || '',
+    orderId: i.orderId, orderNumber: i.orderNumber,
+    customer: i.snapshot?.customer?.name || '', email: i.snapshot?.customer?.email || '', userId: i.userId || '',
     totalCents: i.totalCents, currency: i.currency, paymentStatus: i.paymentStatus, bytes: i.bytes || 0
   })));
+});
+
+// Admin-entered invoice for a registered customer. Prices, tax and the total
+// are computed here (and in the invoice service); the browser only supplies
+// integer cents and quantities.
+app.post('/api/admin/invoices', A, async (req, res) => {
+  const b = req.body || {};
+  const user = db.users.find(u => u.id === sec.str(b.userId, 40));
+  if (!user) return fail(res, 'Select a registered customer', 422);
+
+  const rawItems = Array.isArray(b.items) ? b.items.slice(0, 20) : [];
+  if (!rawItems.length) return fail(res, 'Add at least one line item', 422);
+  const items = [];
+  for (const it of rawItems) {
+    const description = sec.str(it.description, 200);
+    const qty = sec.int(it.qty, 1, 999, null);
+    const unitCents = sec.int(it.unitCents, 0, 10000000, null);
+    if (!description) return fail(res, 'Each line needs a description', 422);
+    if (qty === null) return fail(res, 'Each quantity must be a whole number from 1 to 999', 422);
+    if (unitCents === null) return fail(res, 'Each unit price must be a valid amount', 422);
+    items.push({ description, qty, unitCents });
+  }
+
+  const taxProvince = sec.str(b.taxProvince, 2).toUpperCase();
+  if (taxProvince && !((db.settings.tax.rates || {})[taxProvince])) return fail(res, 'Unknown tax province', 422);
+  const shippingCents = sec.int(b.shippingCents ? Number(b.shippingCents) : 0, 0, 1000000, 0);
+  const issueDate = sec.str(b.issueDate, 20);
+  const dueDate = sec.str(b.dueDate, 20);
+  if (issueDate && isNaN(Date.parse(issueDate))) return fail(res, 'Enter a valid invoice date', 422);
+  if (dueDate && isNaN(Date.parse(dueDate))) return fail(res, 'Enter a valid due date', 422);
+
+  try {
+    const inv = await tx(() => invoices.createAdminInvoice({
+      user,
+      items,
+      issueDate,
+      dueDate,
+      taxProvince,
+      shippingCents,
+      paymentStatus: b.paymentStatus === 'paid' ? 'paid' : 'unpaid',
+      notes: sec.str(b.notes, 800),
+      actor: req.u.name || 'admin'
+    }));
+    audit.log({ actor: req.u.name || 'admin', actorId: req.u.id, role: req.u.role, action: 'invoice.created', target: 'invoice', targetId: inv.id,
+      meta: { number: inv.number, userId: user.id, email: user.email, totalCents: inv.totalCents, status: inv.paymentStatus }, ip: sec.ipOf(req) });
+    save();
+    json(res, { invoice: { id: inv.id, number: inv.number, userId: inv.userId, totalCents: inv.totalCents, paymentStatus: inv.paymentStatus } });
+  } catch (e) {
+    fail(res, e.message || 'Could not create the invoice', 422);
+  }
 });
 
 app.get('/api/admin/invoices/:id/pdf', A, (req, res) => {
@@ -1140,31 +1231,6 @@ app.put('/api/admin/settings', AS, (req, res) => {
   save();
   audit.log({ actor: req.u.name || 'super', actorId: req.u.id, role: req.u.role, action: 'settings.updated', target: 'settings', meta: { keys: Object.keys(req.body) }, ip: sec.ipOf(req) });
   json(res, { ok: 1 });
-});
-
-// Discount codes (super only)
-app.get('/api/admin/discounts', AS, (req, res) => json(res, db.discounts));
-app.post('/api/admin/discounts', AS, (req, res) => {
-  const b = req.body || {};
-  const code = sec.str(b.code, 40).toUpperCase().replace(/[^A-Z0-9_-]/g, '');
-  const type = sec.oneOf(b.type, ['percent', 'fixed'], 'percent');
-  const value = Number(b.value);
-  if (!code || !(value > 0)) return fail(res, 'A code and a positive value are required');
-  if (db.discounts.some(d => d.code === code)) return fail(res, 'That code already exists');
-  const d = {
-    id: crypto.randomBytes(5).toString('hex'), code, type,
-    value: type === 'percent' ? Math.min(100, value) : Math.round(value * 100),
-    minSubtotalCents: Math.max(0, toCents(b.minSubtotalCents ? b.minSubtotalCents / 100 : b.minSubtotal || 0)),
-    usageLimit: b.usageLimit ? sec.int(b.usageLimit, 1, 1e6, 100) : null,
-    used: 0, active: true, created: new Date().toISOString(),
-    expiresAt: b.expiresAt && !isNaN(Date.parse(b.expiresAt)) ? new Date(b.expiresAt).toISOString() : ''
-  };
-  db.discounts.push(d); save();
-  audit.log({ actor: req.u.name || 'super', actorId: req.u.id, role: req.u.role, action: 'discount.created', target: 'discount', targetId: d.id, meta: { code, type }, ip: sec.ipOf(req) });
-  json(res, d);
-});
-app.delete('/api/admin/discounts/:id', AS, (req, res) => {
-  db.discounts = db.discounts.filter(d => d.id !== req.params.id); save(); json(res, { ok: 1 });
 });
 
 // ---------------------------------------------------------------------------

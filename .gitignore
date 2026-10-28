@@ -10,3 +10,4 @@ data/db.json.corrupt-*
 data/db.json.pre-ecom
 data/invoices/
 screenshots/
+.freebuff/tmp/

@@ -52,7 +52,7 @@ ok('register two customers', regA.status === 200 && regB.status === 200 && !!TA 
 
 // ---- 2. Public config ----
 let r = await req('/api/site');
-ok('site exposes sandbox payment mode', r.j?.payment?.mode === 'sandbox' && r.j.payment.sandbox === true, JSON.stringify(r.j?.payment));
+ok('site exposes the test payment mode', r.j?.payment?.mode === 'sandbox' && r.j.payment.sandbox === true && r.j.payment.testMode === true && r.j.payment.cardOnly === true, JSON.stringify(r.j?.payment));
 ok('site lists 13 provinces/territories', r.j?.provinces?.length === 13, String(r.j?.provinces?.length));
 ok('shop carousel configured with slides', Array.isArray(r.j?.c?.carousel) && r.j.c.carousel.length >= 1, JSON.stringify(r.j?.c?.carousel?.length));
 
@@ -111,15 +111,12 @@ await req('/api/admin/settings', { method: 'PUT', token: ST, body: { shipping: s
 r = await quote(base);
 ok('zones restored after the serviceability test', r.j.ok === true && r.j.serviceable === true, JSON.stringify(r.j.error));
 
-// discount code
-const code = 'SAVE10' + tag.slice(0, 3).toUpperCase();
-r = await req('/api/admin/discounts', { method: 'POST', token: ST, body: { code, type: 'percent', value: 10 } });
-ok('super creates a percentage discount', r.status === 200 && r.j.code === code, JSON.stringify(r.j));
-r = await quote({ ...base, discountCode: code });
-const qDisc = r.j;
-ok('discount applied to subtotal before tax', qDisc.discountCents === 300 && qDisc.taxCents === Math.round((3000 - 300 + qDisc.shippingCents) * 0.13), JSON.stringify(qDisc));
-r = await quote({ ...base, discountCode: 'NOPE' + tag });
-ok('invalid discount code reported without breaking the quote', r.status === 200 && /not valid/i.test(r.j.error || ''), r.j.error);
+// discount / promo codes have been removed entirely
+r = await req('/api/admin/discounts', { token: ST });
+ok('discount/promo endpoints are gone', r.status === 404, String(r.status));
+r = await quote({ ...base, discountCode: 'SAVE10' + tag });
+ok('a discount code cannot change the server total', r.status === 200 && r.j.discountCents === 0 && r.j.discountCode === '' && r.j.totalCents === qON.totalCents, JSON.stringify(r.j));
+ok('checkout config offers card as the only payment method', (await req('/api/checkout/config')).j.cardOnly === true);
 
 // ---- 5. Checkout authorisation + order creation ----
 r = await req('/api/checkout', { method: 'POST', body: { ...base, name: 'Guest', email: 'g@test.dev', phone: '+1 416 555 0100', street: '1 King St W', city: 'Toronto' } });
@@ -336,14 +333,57 @@ ok('audit log records invoice downloads', r.j.some(a => a.action === 'invoice.do
 r = await req('/api/admin/payments', { token: ST });
 ok('payments overview exposes provider references without card data', r.status === 200 && r.j.payments.some(p => p.orderId === orderA.id) && !JSON.stringify(r.j).includes('4242424242424242'), JSON.stringify(r.j.payments.length));
 
-// ---- 17. Unpaid COD order is never marked paid by the browser ----
-r = await req('/api/checkout', { method: 'POST', token: TB, headers: { 'Idempotency-Key': 'cod-' + tag }, body: { ...addrA, name: 'Bob Buyer', email: custB, paymentMethod: 'cod', items: [{ id: 'p1', qty: 1 }] } });
-ok('pay-on-delivery order is created unpaid', r.status === 200 && r.j.order.paymentStatus === 'requires_payment' && !r.j.clientSecret, JSON.stringify(r.j?.order?.paymentStatus));
-const codOrder = r.j.order;
-r = await req('/api/orders/' + codOrder.id, { token: TB });
-ok('COD order never reports itself paid', r.j.paymentStatus !== 'paid', r.j.paymentStatus);
+// ---- 16b. Admin-entered invoices for registered customers ----
+r = await req('/api/admin/customers/options', { token: AT });
+ok('admin can list registered customers for invoicing', r.status === 200 && r.j.some(u => u.email === custA) && !r.j.some(u => /@demo\./.test(u.email)), JSON.stringify(r.j?.map(u => u.email)));
+const custAId = r.j.find(u => u.email === custA).id;
+
+r = await req('/api/admin/invoices', { method: 'POST', token: AT, body: {
+  userId: custAId,
+  items: [{ description: 'Site survey', qty: 2, unitCents: 12500 }, { description: 'Materials', qty: 1, unitCents: 5000 }],
+  taxProvince: 'ON', shippingCents: 1500, paymentStatus: 'unpaid', notes: 'PO 1234'
+} });
+const adminInv = r.j?.invoice;
+ok('admin creates an itemized invoice for a selected customer', r.status === 200 && !!adminInv?.number, JSON.stringify(r.j));
+ok('admin invoice total is server-computed (30000 + 1500 shipping + 13% tax = 35595)', adminInv?.totalCents === 35595, String(adminInv?.totalCents));
+ok('admin invoice number is human readable', /^JNL-INV-\d{4}-\d{4,}$/.test(adminInv?.number || ''), adminInv?.number);
+
+r = await req('/api/invoices', { token: TA });
+ok('invoice appears in the selected customer dashboard', r.status === 200 && r.j.some(i => i.id === adminInv.id && i.paymentStatus === 'unpaid'), JSON.stringify(r.j.map(i => i.number)));
 r = await req('/api/invoices', { token: TB });
-ok('no invoice exists for an unpaid COD order', !r.j.some(i => i.orderId === codOrder.id), JSON.stringify(r.j.map(i => i.orderId)));
+ok('the invoice is not visible to another customer', !r.j.some(i => i.id === adminInv.id));
+r = await req('/api/invoices/' + adminInv.id + '/pdf', { token: TA });
+ok('customer downloads the admin invoice PDF', r.status === 200 && r.buf.slice(0, 4).toString() === '%PDF' && /JNL-INV-/.test(r.headers.get('content-disposition') || ''), String(r.status));
+r = await req('/api/invoices/' + adminInv.id + '/pdf', { token: TB });
+ok("another customer cannot download the admin invoice", r.status === 404, String(r.status));
+r = await req('/api/admin/invoices', { token: ST });
+const listed = r.j.find(i => i.id === adminInv.id);
+ok('admin list shows the entered invoice with its customer and status', listed?.source === 'admin' && listed.email === custA && listed.paymentStatus === 'unpaid', JSON.stringify(listed));
+r = await req('/api/admin/invoices', { method: 'POST', token: AT, body: { userId: 'nope', items: [{ description: 'x', qty: 1, unitCents: 100 }] } });
+ok('invoice for an unknown customer is rejected', r.status === 422, String(r.status));
+r = await req('/api/admin/invoices', { method: 'POST', token: AT, body: { userId: custAId, items: [] } });
+ok('invoice without line items is rejected', r.status === 422, String(r.status));
+r = await req('/api/admin/invoices', { method: 'POST', token: TB, body: { userId: custAId, items: [{ description: 'x', qty: 1, unitCents: 100 }] } });
+ok('customers cannot create invoices', r.status === 401, String(r.status));
+
+// ---- 16c. Receipts for recorded payments ----
+r = await req('/api/admin/payments/' + orderA.id + '/receipt', { token: AT });
+ok('admin downloads a PDF receipt for a recorded payment', r.status === 200 && r.buf.slice(0, 4).toString() === '%PDF' && /JNL-RCPT-/.test(r.headers.get('content-disposition') || ''), JSON.stringify({ status: r.status, type: r.buf.slice(0, 4).toString() }));
+r = await req('/api/admin/payments/' + orderA.id + '/receipt', { token: TB });
+ok('receipts require an admin', r.status === 401, String(r.status));
+r = await req('/api/admin/payments/' + orderTamper.id + '/receipt', { token: ST });
+ok('no receipt exists for an unpaid order', r.status === 409, String(r.status));
+r = await req('/api/admin/audit', { token: ST });
+ok('receipt downloads and invoice creation are audited', r.j.some(a => a.action === 'receipt.downloaded' && a.targetId === orderA.id) && r.j.some(a => a.action === 'invoice.created' && a.targetId === adminInv.id), JSON.stringify(r.j.map(a => a.action).slice(0, 6)));
+
+// ---- 17. Card is the only payment method; no COD or bank transfer ----
+r = await req('/api/checkout', { method: 'POST', token: TB, headers: { 'Idempotency-Key': 'cod-' + tag }, body: { ...addrA, name: 'Bob Buyer', email: custB, paymentMethod: 'cod', items: [{ id: 'p1', qty: 1 }] } });
+ok('pay-on-delivery checkout is rejected', r.status === 422 && /card/i.test(r.j?.error || ''), JSON.stringify(r.j));
+r = await req('/api/checkout', { method: 'POST', token: TB, headers: { 'Idempotency-Key': 'bank-' + tag }, body: { ...addrA, name: 'Bob Buyer', email: custB, paymentMethod: 'bank', items: [{ id: 'p1', qty: 1 }] } });
+ok('bank transfer checkout is rejected', r.status === 422, String(r.status));
+r = await req('/api/admin/orders?payment=requires_payment', { token: ST });
+ok('payment filter is applied server-side', r.status === 200 && r.j.orders.every(o => o.paymentStatus === 'requires_payment'), JSON.stringify(r.j.orders.map(o => o.paymentStatus)));
+ok('rejected COD/bank attempts created no order', r.j.orders.every(o => o.method === 'card'), JSON.stringify(r.j.orders.map(o => o.method)));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
